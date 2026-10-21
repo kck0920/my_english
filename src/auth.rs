@@ -26,6 +26,7 @@ pub struct LoginForm {
 pub fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health_handler))
+        .route("/favicon.ico", get(favicon_handler))
         .route("/login", get(login_page).post(login_submit))
         .route("/logout", post(logout_submit))
         .route("/manifest.json", get(manifest_handler))
@@ -33,6 +34,10 @@ pub fn public_routes() -> Router<AppState> {
 
 async fn health_handler() -> &'static str {
     "ok"
+}
+
+async fn favicon_handler() -> StatusCode {
+    StatusCode::NO_CONTENT
 }
 
 async fn manifest_handler() -> impl IntoResponse {

@@ -461,7 +461,8 @@ pub async fn audio_gym_page(
         let playlist = [];
         let currentIndex = 0;
         let isPlaying = false;
-        let currentPlayToken = 0;
+        let currentStepRunId = 0;
+        let currentSpeechToken = 0;
         let gapSeconds = {gap};
         let voiceGender = '{gender}';
         let currentStep = 'idle';
@@ -597,7 +598,7 @@ pub async fn audio_gym_page(
                     speechWatchdogTimer = null;
                 }}
                 window.currentUtterance = null;
-                if (token !== undefined && token !== currentPlayToken) return;
+                if (token !== undefined && token !== currentSpeechToken) return;
                 if (onFinish) onFinish();
             }};
 
@@ -643,18 +644,18 @@ pub async fn audio_gym_page(
                 return;
             }}
 
-            const myToken = ++currentPlayToken;
+            const myToken = ++currentSpeechToken;
             const gender = voiceGender;
             const key = getAudioCacheKey(text, lang, gender);
             const audio = getSharedAudio();
 
             audio.onended = () => {{
-                if (myToken !== currentPlayToken) return;
+                if (myToken !== currentSpeechToken) return;
                 if (onEndCallback) onEndCallback();
             }};
 
             audio.onerror = (e) => {{
-                if (myToken !== currentPlayToken) return;
+                if (myToken !== currentSpeechToken) return;
                 console.warn('Audio stream error, falling back to Web Speech:', e);
                 playBrowserSpeech(text, lang, gender, myToken, onEndCallback);
             }};
@@ -670,15 +671,15 @@ pub async fn audio_gym_page(
             const p = audio.play();
             if (p !== undefined) {{
                 p.catch(err => {{
-                    if (myToken !== currentPlayToken) return;
+                    if (myToken !== currentSpeechToken) return;
                     console.warn('audio.play() rejected, retrying with blob prefetch:', err);
                     prefetchSpeechAudio(text, lang, gender).then(blobUrl => {{
-                        if (myToken !== currentPlayToken) return;
+                        if (myToken !== currentSpeechToken) return;
                         if (blobUrl) {{
                             audio.src = blobUrl;
                         }}
                         audio.play().catch(retryErr => {{
-                            if (myToken !== currentPlayToken) return;
+                            if (myToken !== currentSpeechToken) return;
                             console.warn('Retry failed, falling back to Web Speech:', retryErr);
                             playBrowserSpeech(text, lang, gender, myToken, onEndCallback);
                         }});
@@ -688,7 +689,7 @@ pub async fn audio_gym_page(
         }}
 
         function stopCurrentSpeech() {{
-            currentPlayToken++;
+            currentSpeechToken++;
             if (speechWatchdogTimer) {{
                 clearTimeout(speechWatchdogTimer);
                 speechWatchdogTimer = null;
@@ -804,6 +805,7 @@ pub async fn audio_gym_page(
 
         function pause() {{
             isPlaying = false;
+            currentStepRunId++;
             stopCurrentSpeech();
             playBtn.innerText = '▶ 시작하기';
             if (stepTimer) {{
@@ -816,6 +818,7 @@ pub async fn audio_gym_page(
         async function play() {{
             if (playlist.length === 0) return;
             isPlaying = true;
+            currentStepRunId++;
             playBtn.innerText = '⏸ 일시정지';
             acquireWakeLock();
 
@@ -828,16 +831,17 @@ pub async fn audio_gym_page(
                 }}).catch(() => {{}});
             }} catch (e) {{}}
 
-            runCurrentStep(currentPlayToken);
+            runCurrentStep(currentStepRunId);
         }}
 
         function prevCard() {{
             if (currentIndex > 0) {{
                 currentIndex--;
                 if (isPlaying) {{
+                    currentStepRunId++;
                     stopCurrentSpeech();
                     if (stepTimer) {{ clearInterval(stepTimer); stepTimer = null; }}
-                    runCurrentStep(currentPlayToken);
+                    runCurrentStep(currentStepRunId);
                 }} else {{
                     updateProgress();
                     const card = playlist[currentIndex];
@@ -852,9 +856,10 @@ pub async fn audio_gym_page(
             if (currentIndex < playlist.length - 1) {{
                 currentIndex++;
                 if (isPlaying) {{
+                    currentStepRunId++;
                     stopCurrentSpeech();
                     if (stepTimer) {{ clearInterval(stepTimer); stepTimer = null; }}
-                    runCurrentStep(currentPlayToken);
+                    runCurrentStep(currentStepRunId);
                 }} else {{
                     updateProgress();
                     const card = playlist[currentIndex];
@@ -870,7 +875,7 @@ pub async fn audio_gym_page(
         }}
 
         async function runCurrentStep(runId) {{
-            if (!isPlaying || runId !== currentPlayToken || currentIndex >= playlist.length) return;
+            if (!isPlaying || runId !== currentStepRunId || currentIndex >= playlist.length) return;
             const card = playlist[currentIndex];
             updateProgress();
             updateMediaSession(card, currentIndex, playlist.length);
@@ -895,7 +900,7 @@ pub async fn audio_gym_page(
             await new Promise(resolve => {{
                 playSpeech(card.korean_meaning, 'ko', resolve);
             }});
-            if (!isPlaying || runId !== currentPlayToken) return;
+            if (!isPlaying || runId !== currentStepRunId) return;
 
             // STEP 2: 직접 영어로 말해보세요! (Think & Speak)
             currentStep = 'gap';
@@ -906,7 +911,7 @@ pub async fn audio_gym_page(
 
             await new Promise(resolve => {{
                 stepTimer = setInterval(() => {{
-                    if (!isPlaying || runId !== currentPlayToken) {{
+                    if (!isPlaying || runId !== currentStepRunId) {{
                         clearInterval(stepTimer);
                         stepTimer = null;
                         return resolve();
@@ -922,7 +927,7 @@ pub async fn audio_gym_page(
                     }}
                 }}, 1000);
             }});
-            if (!isPlaying || runId !== currentPlayToken) return;
+            if (!isPlaying || runId !== currentStepRunId) return;
 
             // STEP 3: 원어민 영어 확인 (1/2)
             currentStep = 'en1';
@@ -935,10 +940,10 @@ pub async fn audio_gym_page(
             await new Promise(resolve => {{
                 playSpeech(card.context_sentence, 'en', resolve);
             }});
-            if (!isPlaying || runId !== currentPlayToken) return;
+            if (!isPlaying || runId !== currentStepRunId) return;
 
             await new Promise(r => setTimeout(r, 600));
-            if (!isPlaying || runId !== currentPlayToken) return;
+            if (!isPlaying || runId !== currentStepRunId) return;
 
             // STEP 4: 입으로 따라 말하기 (Shadowing 2/2)
             currentStep = 'en2';
@@ -946,14 +951,14 @@ pub async fn audio_gym_page(
             await new Promise(resolve => {{
                 playSpeech(card.context_sentence, 'en', resolve);
             }});
-            if (!isPlaying || runId !== currentPlayToken) return;
+            if (!isPlaying || runId !== currentStepRunId) return;
 
             await new Promise(r => setTimeout(r, 1200));
-            if (!isPlaying || runId !== currentPlayToken) return;
+            if (!isPlaying || runId !== currentStepRunId) return;
 
             if (currentIndex < playlist.length - 1) {{
                 currentIndex++;
-                runCurrentStep(currentPlayToken);
+                runCurrentStep(runId);
             }} else {{
                 pause();
                 stepIndicator.innerText = '완료 🎉';
