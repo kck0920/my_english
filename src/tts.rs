@@ -143,15 +143,24 @@ impl HttpTtsProvider {
 impl TtsProvider for HttpTtsProvider {
     async fn synthesize(&self, text: &str, lang: &str, gender: &str) -> Result<Vec<u8>> {
         if lang.eq_ignore_ascii_case("en") {
-            // 1st choice: Amazon Polly
-            match self.fetch_amazon_polly(text, gender).await {
-                Ok(bytes) if !bytes.is_empty() => return Ok(bytes),
-                Err(err) => {
+            // 1st choice: Amazon Polly (최대 3초 대기, 지연 시 즉시 Google TTS로 폴백)
+            let polly_result = tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                self.fetch_amazon_polly(text, gender),
+            )
+            .await;
+
+            match polly_result {
+                Ok(Ok(bytes)) if !bytes.is_empty() => return Ok(bytes),
+                Ok(Err(err)) => {
                     tracing::warn!("Amazon Polly failed, falling back to Google TTS: {:#}", err);
+                }
+                Err(_) => {
+                    tracing::warn!("Amazon Polly timed out (3s), falling back to Google TTS immediately");
                 }
                 _ => {}
             }
-            // 2nd choice: Google Translate TTS fallback
+            // 2nd choice: Google Translate TTS fallback (초고속 안정성)
             self.fetch_google_tts(text, "en").await
         } else {
             // Korean and other languages: Google Translate TTS
@@ -500,6 +509,25 @@ pub async fn audio_gym_page(
             }}
         }}
 
+        let currentAudioResolve = null;
+
+        audio.onended = () => {{
+            if (currentAudioResolve) {{
+                const fn = currentAudioResolve;
+                currentAudioResolve = null;
+                fn();
+            }}
+        }};
+
+        audio.onerror = (e) => {{
+            console.warn('Audio playback error, resolving step', e);
+            if (currentAudioResolve) {{
+                const fn = currentAudioResolve;
+                currentAudioResolve = null;
+                fn();
+            }}
+        }};
+
         function togglePlay() {{
             if (isPlaying) {{
                 pause();
@@ -512,6 +540,11 @@ pub async fn audio_gym_page(
             isPlaying = false;
             playBtn.innerText = '▶ 재생';
             audio.pause();
+            if (currentAudioResolve) {{
+                const fn = currentAudioResolve;
+                currentAudioResolve = null;
+                fn();
+            }}
             if ('speechSynthesis' in window) {{
                 window.speechSynthesis.cancel();
             }}
@@ -524,6 +557,7 @@ pub async fn audio_gym_page(
             isPlaying = true;
             playBtn.innerText = '⏸ 일시정지';
             acquireWakeLock();
+            audio.play().catch(() => {{}});
             runCurrentStep();
         }}
 
@@ -577,36 +611,17 @@ pub async fn audio_gym_page(
                     }}
                 }};
 
-                try {{
-                    const url = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
-                    const s = new Audio(url);
-                    let timeoutId = setTimeout(() => {{
-                        console.warn('Audio play timed out after 7s, falling back');
-                        s.pause();
-                        fallbackWebSpeech();
-                    }}, 7000);
+                currentAudioResolve = done;
 
-                    s.onended = () => {{
-                        clearTimeout(timeoutId);
-                        done();
-                    }};
-                    s.onerror = (e) => {{
-                        clearTimeout(timeoutId);
-                        console.warn('Server TTS failed, falling back to Web Speech API', e);
-                        fallbackWebSpeech();
-                    }};
+                const url = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
+                audio.src = url;
 
-                    const p = s.play();
-                    if (p && typeof p.catch === 'function') {{
-                        p.catch((err) => {{
-                            clearTimeout(timeoutId);
-                            console.warn('Audio play() rejected, falling back to Web Speech API', err);
-                            fallbackWebSpeech();
-                        }});
-                    }}
-                }} catch (e) {{
-                    console.warn('Audio object initialization failed, falling back', e);
-                    fallbackWebSpeech();
+                const p = audio.play();
+                if (p && typeof p.catch === 'function') {{
+                    p.catch((err) => {{
+                        console.warn('audio.play() rejected, falling back to Web Speech API', err);
+                        fallbackWebSpeech();
+                    }});
                 }}
             }});
         }}
