@@ -26,6 +26,10 @@ pub fn routes() -> Router<AppState> {
         .route("/api/review/{id}/check", post(api_check_answer_handler))
         .route("/review/{id}/rate", post(rate_card_handler))
         .route("/api/review/{id}/rate", post(api_rate_card_handler))
+        .route("/review/{id}/transfer-prompt", post(transfer_prompt_handler))
+        .route("/api/review/{id}/transfer-prompt", post(api_transfer_prompt_handler))
+        .route("/review/{id}/transfer-evaluate", post(transfer_evaluate_handler))
+        .route("/api/review/{id}/transfer-evaluate", post(api_transfer_evaluate_handler))
         .route("/api/review/logs", get(api_review_logs_handler))
 }
 
@@ -35,6 +39,8 @@ pub struct ReviewPageQuery {
     pub reveal: Option<String>,
     #[serde(default)]
     pub card_id: Option<i64>,
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 impl ReviewPageQuery {
@@ -128,6 +134,29 @@ async fn review_page_handler(
 
     match card_opt {
         Some(card) => {
+            let is_standard_mode = query.mode.as_deref().map(str::trim) == Some("standard");
+            if card.srs_stage >= 3 && !is_standard_mode && !query.is_revealed() {
+                // Output Transfer mode for Stage 3+ cards
+                match state.ai_provider.generate_output_transfer_prompt(
+                    &card.chunk,
+                    &card.context_sentence,
+                    &card.korean_meaning,
+                ).await {
+                    Ok(prompt) => {
+                        return Html(render_output_transfer_prompt_page(
+                            &card,
+                            &prompt,
+                            due_count,
+                            None,
+                        ))
+                        .into_response();
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to generate output transfer prompt, falling back to cloze: {:#}", err);
+                    }
+                }
+            }
+
             let cloze =
                 mask_context_sentence(&card.context_sentence, &card.surface_chunk, &card.chunk);
             Html(render_review_card_page(
@@ -160,6 +189,247 @@ async fn api_review_next_handler(State(state): State<AppState>) -> Response {
         cloze,
     })
     .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TransferEvaluateInput {
+    pub korean_prompt: String,
+    pub user_sentence: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TransferEvaluateResponse {
+    pub card_id: i64,
+    pub korean_prompt: String,
+    pub user_sentence: String,
+    pub passed: bool,
+    pub corrected_sentence: String,
+    pub feedback: String,
+}
+
+pub async fn transfer_prompt_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    api_transfer_prompt_handler(State(state), Path(id)).await
+}
+
+pub async fn api_transfer_prompt_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Response {
+    let Some(card) = (match get_study_card_by_id(&state.pool, id).await {
+        Ok(c) => c,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {err}")).into_response(),
+    }) else {
+        return (StatusCode::NOT_FOUND, "Card not found").into_response();
+    };
+
+    match state.ai_provider.generate_output_transfer_prompt(
+        &card.chunk,
+        &card.context_sentence,
+        &card.korean_meaning,
+    ).await {
+        Ok(prompt) => Json(prompt).into_response(),
+        Err(err) => (StatusCode::BAD_GATEWAY, format!("AI error: {err}")).into_response(),
+    }
+}
+
+pub async fn api_transfer_evaluate_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(input): Json<TransferEvaluateInput>,
+) -> Response {
+    transfer_evaluate_impl(state, id, input.korean_prompt, input.user_sentence, true).await
+}
+
+pub async fn transfer_evaluate_handler(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let wants_json = headers.get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.contains("application/json"))
+        .unwrap_or(false);
+
+    let (korean_prompt, user_sentence) = if let Ok(json_input) = serde_json::from_slice::<TransferEvaluateInput>(&body) {
+        (json_input.korean_prompt, json_input.user_sentence)
+    } else if let Ok(form) = serde_urlencoded::from_bytes::<std::collections::HashMap<String, String>>(&body) {
+        (
+            form.get("korean_prompt").cloned().unwrap_or_default(),
+            form.get("user_sentence").cloned().unwrap_or_default(),
+        )
+    } else {
+        return (StatusCode::BAD_REQUEST, "Invalid evaluate payload").into_response();
+    };
+
+    transfer_evaluate_impl(state, id, korean_prompt, user_sentence, wants_json).await
+}
+
+async fn transfer_evaluate_impl(
+    state: AppState,
+    id: i64,
+    korean_prompt: String,
+    user_sentence: String,
+    wants_json: bool,
+) -> Response {
+    let Some(card) = (match get_study_card_by_id(&state.pool, id).await {
+        Ok(c) => c,
+        Err(err) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("DB error: {err}")).into_response(),
+    }) else {
+        return (StatusCode::NOT_FOUND, "Card not found").into_response();
+    };
+
+    let evaluation = match state.ai_provider.evaluate_output_transfer(
+        &card.chunk,
+        &korean_prompt,
+        &user_sentence,
+    ).await {
+        Ok(ev) => ev,
+        Err(err) => return (StatusCode::BAD_GATEWAY, format!("AI evaluation failed: {err}")).into_response(),
+    };
+
+    if wants_json {
+        Json(TransferEvaluateResponse {
+            card_id: card.id,
+            korean_prompt,
+            user_sentence,
+            passed: evaluation.passed,
+            corrected_sentence: evaluation.corrected_sentence,
+            feedback: evaluation.feedback,
+        }).into_response()
+    } else {
+        let due_count = count_due_cards(&state.pool).await.unwrap_or(0);
+        let prompt = crate::domain::OutputTransferPrompt {
+            korean_prompt: korean_prompt.clone(),
+            hint: String::new(),
+        };
+        Html(render_output_transfer_prompt_page(
+            &card,
+            &prompt,
+            due_count,
+            Some((&user_sentence, &evaluation)),
+        )).into_response()
+    }
+}
+
+pub fn render_output_transfer_prompt_page(
+    card: &StudyCard,
+    prompt: &crate::domain::OutputTransferPrompt,
+    due_count: i64,
+    evaluated: Option<(&str, &crate::domain::OutputTransferEvaluation)>,
+) -> String {
+    let eval_section = if let Some((user_sent, eval)) = evaluated {
+        let border_color = if eval.passed { "var(--accent)" } else { "var(--danger)" };
+        let status_badge = if eval.passed {
+            "<span class=\"stage-badge\" style=\"background: var(--accent); color: white;\">통과 (Pass)</span>"
+        } else {
+            "<span class=\"stage-badge\" style=\"background: var(--danger); color: white;\">보완 필요</span>"
+        };
+        format!(
+            r#"<section class="panel" style="border-left: 4px solid {border_color}; margin-top: 1rem;">
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+    <strong>AI 첨삭 및 피드백</strong>
+    {status_badge}
+  </div>
+  <p style="margin: 0.25rem 0;"><strong>내 영작:</strong> {user_sent}</p>
+  <p style="margin: 0.25rem 0; color: var(--primary);"><strong>원어민 추천 문장:</strong> {corrected}</p>
+  <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem; color: var(--text-muted);">{feedback}</p>
+
+  <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+    <form method="POST" action="/review/{id}/rate" style="display:inline;">
+      <input type="hidden" name="user_input" value="{user_sent}">
+      <input type="hidden" name="ai_feedback" value="{feedback}">
+      <input type="hidden" name="mode" value="output_transfer">
+      <input type="hidden" name="rating" value="again">
+      <button type="submit" class="btn btn-danger">Again (당일 재복습 · Stage 1)</button>
+    </form>
+    <form method="POST" action="/review/{id}/rate" style="display:inline;">
+      <input type="hidden" name="user_input" value="{user_sent}">
+      <input type="hidden" name="ai_feedback" value="{feedback}">
+      <input type="hidden" name="mode" value="output_transfer">
+      <input type="hidden" name="rating" value="good">
+      <button type="submit" class="btn btn-primary">Good (+1 Stage)</button>
+    </form>
+    <form method="POST" action="/review/{id}/rate" style="display:inline;">
+      <input type="hidden" name="user_input" value="{user_sent}">
+      <input type="hidden" name="ai_feedback" value="{feedback}">
+      <input type="hidden" name="mode" value="output_transfer">
+      <input type="hidden" name="rating" value="easy">
+      <button type="submit" class="btn">Easy (+2 Stages)</button>
+    </form>
+  </div>
+</section>"#,
+            border_color = border_color,
+            status_badge = status_badge,
+            user_sent = escape_html(user_sent),
+            corrected = escape_html(&eval.corrected_sentence),
+            feedback = escape_html(&eval.feedback),
+            id = card.id,
+        )
+    } else {
+        format!(
+            r#"<section class="panel" style="margin-top: 1rem;">
+  <form method="POST" action="/review/{id}/transfer-evaluate">
+    <input type="hidden" name="korean_prompt" value="{korean_prompt}">
+    <label for="user_sentence">위 상황을 영어로 작문해 보세요 (Target Chunk: <strong>{chunk}</strong> 활용)</label>
+    <textarea id="user_sentence" name="user_sentence" rows="3" style="width: 100%; margin: 0.5rem 0;" autofocus placeholder="영작을 입력하세요..."></textarea>
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+      <button type="submit" class="btn btn-primary">AI 첨삭 및 제출</button>
+      <a href="/review?mode=standard&amp;card_id={id}" class="btn">기존 빈칸 복습으로 전환</a>
+    </div>
+  </form>
+</section>"#,
+            id = card.id,
+            korean_prompt = escape_html(&prompt.korean_prompt),
+            chunk = escape_html(&card.chunk),
+        )
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Output Transfer Challenge - My English</title>
+  <link rel="manifest" href="/manifest.json">
+  <style>{css}</style>
+</head>
+<body>
+  <div class="container">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+      <a href="/" style="text-decoration:none; color:var(--primary); font-size:0.9rem;">← 홈으로</a>
+      <span style="font-size:0.9rem; color:var(--text-muted);">남은 복습: <strong>{due_count}</strong></span>
+    </div>
+
+    <section class="panel" style="border-left: 4px solid var(--primary);">
+      <div class="chunk-header">
+        <span class="stage-badge">SRS Stage {stage} · Output Transfer</span>
+        <span class="surface-badge">Chunk: {chunk}</span>
+      </div>
+      <h2 style="font-size: 1.15rem; margin: 0.75rem 0 0.5rem 0; color: var(--text-dark);">
+        상황 제시: "{korean_prompt}"
+      </h2>
+      <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0;">
+        (원래 예문: {orig_context})
+      </p>
+    </section>
+
+    {eval_section}
+  </div>
+</body>
+</html>"#,
+        css = APP_CSS,
+        due_count = due_count,
+        stage = card.srs_stage,
+        chunk = escape_html(&card.chunk),
+        korean_prompt = escape_html(&prompt.korean_prompt),
+        orig_context = escape_html(&card.context_sentence),
+        eval_section = eval_section,
+    )
 }
 
 fn parse_check_payload(headers: &HeaderMap, body: &Bytes) -> Result<(CheckAnswerInput, bool)> {
