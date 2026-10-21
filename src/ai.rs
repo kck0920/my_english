@@ -1064,6 +1064,7 @@ async fn smart_input_handler(
 pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String {
     let mut drafts_html = String::new();
     for (idx, draft) in drafts.iter().enumerate() {
+        let card_num = idx + 1;
         let extra_examples_text = draft
             .extra_examples
             .iter()
@@ -1079,8 +1080,12 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
         let tags_text = draft.tags.join(", ");
 
         drafts_html.push_str(&format!(
-            r#"<article class="study-card draft-card" data-draft-index="{idx}">
-  <form method="POST" action="/cards">
+            r#"<article class="study-card draft-card" data-draft-index="{idx}" id="draft-card-{idx}">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.75rem;">
+    <span class="badge" style="font-size:0.8rem; background:#334155; color:#94a3b8; font-weight:600; padding:2px 8px; border-radius:4px;">후보 #{card_num}</span>
+    <span class="save-status-badge" style="display:none; font-size:0.85rem; font-weight:700; color:#10b981;">✅ 저장 완료</span>
+  </div>
+  <form method="POST" action="/cards" onsubmit="handleDraftCardSubmit(event, this)">
     <input type="hidden" name="source_type" value="smart_input">
     <label>Chunk (원형)</label>
     <input type="text" name="chunk" value="{chunk}" required>
@@ -1096,10 +1101,11 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
     <textarea name="nuance_note" rows="2">{nuance_note}</textarea>
     <label>상황 태그 (쉼표로 구분)</label>
     <input type="text" name="tags" value="{tags}">
-    <button type="submit" class="btn btn-primary">Study Card로 저장 (Save as Study Card)</button>
+    <button type="submit" class="btn btn-primary submit-btn" style="width:100%; margin-top:0.5rem;">Study Card로 저장 (Save as Study Card)</button>
   </form>
 </article>"#,
             idx = idx,
+            card_num = card_num,
             chunk = escape_html(&draft.chunk),
             surface_chunk = escape_html(&draft.surface_chunk),
             context_sentence = escape_html(&draft.context_sentence),
@@ -1121,6 +1127,8 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
   <style>{APP_CSS}</style>
 </head>
 <body>
+  <div id="toastNotification" style="position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; padding: 0.85rem 1.25rem; background: #0f172a; color: #fff; border: 1px solid #10b981; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; font-weight: 600; align-items: center; gap: 0.5rem; transition: opacity 0.2s ease;"></div>
+
   <div class="container">
     <header class="navbar">
       <strong>My English</strong>
@@ -1142,13 +1150,137 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
     </section>
 
     <section class="panel" id="draft-cards-section">
-      <h2>생성된 Draft Card 후보 ({count}개)</h2>
-      <p style="color: var(--muted); font-size: 0.9rem;">필요하면 필드를 바로 인라인 수정한 뒤 원클릭으로 Study Card에 저장하세요.</p>
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.5rem;">
+        <h2 style="margin: 0;">생성된 Draft Card 후보 ({count}개)</h2>
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+          <button type="button" id="saveAllDraftsBtn" class="btn btn-primary" onclick="saveAllDrafts()" style="background: #2563eb;">⚡ 모든 Draft Card 일괄 저장</button>
+          <a href="/" class="btn" style="background: var(--card-bg, #1e293b); color: var(--text, #f8fafc); border: 1px solid var(--border, #334155); text-decoration: none; display: inline-flex; align-items: center;">홈 (Home)으로 이동</a>
+        </div>
+      </div>
+      <p style="color: var(--muted); font-size: 0.9rem;">필요하면 필드를 바로 인라인 수정한 뒤 원클릭으로 Study Card에 저장하세요. 저장 후에도 페이지를 벗어나지 않고 다른 후보들을 계속 추가할 수 있습니다.</p>
+      <div id="saveAllStatusBanner" style="display:none; padding: 0.85rem 1.15rem; border-radius: 8px; margin-bottom: 1.25rem; background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #10b981; font-weight: 600;"></div>
       <div class="card-grid">
         {drafts_html}
       </div>
     </section>
   </div>
+
+  <script>
+    function showToast(msg) {{
+      const toast = document.getElementById('toastNotification');
+      if (!toast) return;
+      toast.innerText = msg;
+      toast.style.display = 'flex';
+      toast.style.opacity = '1';
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => {{
+        toast.style.opacity = '0';
+        setTimeout(() => {{ toast.style.display = 'none'; }}, 200);
+      }}, 2500);
+    }}
+
+    async function handleDraftCardSubmit(e, form) {{
+      if (e && e.preventDefault) e.preventDefault();
+      const card = form.closest('.draft-card');
+      const btn = form.querySelector('.submit-btn');
+      const statusBadge = card ? card.querySelector('.save-status-badge') : null;
+      const chunkInput = form.querySelector('input[name="chunk"]');
+      const chunkVal = chunkInput ? chunkInput.value : '';
+
+      if (btn && btn.disabled) return;
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) {{
+        btn.disabled = true;
+        btn.innerText = '저장 중...';
+      }}
+
+      try {{
+        const formData = new FormData(form);
+        const body = new URLSearchParams(formData);
+
+        const res = await fetch(form.action, {{
+          method: 'POST',
+          headers: {{
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }},
+          body: body.toString()
+        }});
+
+        if (res.ok) {{
+          if (btn) {{
+            btn.innerText = '✅ 저장 완료 (Saved)';
+            btn.style.background = '#10b981';
+            btn.style.borderColor = '#059669';
+            btn.style.color = '#ffffff';
+          }}
+          if (statusBadge) statusBadge.style.display = 'inline';
+          if (card) {{
+            card.style.border = '2px solid #10b981';
+            card.style.background = 'rgba(16, 185, 129, 0.05)';
+            card.setAttribute('data-saved', 'true');
+          }}
+          showToast(`'${{chunkVal}}' Study Card가 저장되었습니다! 🎉`);
+          checkAllSaved();
+        }} else {{
+          const err = await res.text();
+          alert('저장 실패: ' + err);
+          if (btn) {{
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+          }}
+        }}
+      }} catch (err) {{
+        alert('네트워크 오류: ' + err.message);
+        if (btn) {{
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }}
+      }}
+    }}
+
+    async function saveAllDrafts() {{
+      const forms = Array.from(document.querySelectorAll('.draft-card:not([data-saved="true"]) form'));
+      if (forms.length === 0) {{
+        showToast('이미 모든 Draft Card가 저장되었습니다! 😊');
+        return;
+      }}
+
+      const saveAllBtn = document.getElementById('saveAllDraftsBtn');
+      if (saveAllBtn) {{
+        saveAllBtn.disabled = true;
+        saveAllBtn.innerText = '모두 저장 중...';
+      }}
+
+      for (const form of forms) {{
+        const card = form.closest('.draft-card');
+        if (card && card.getAttribute('data-saved') === 'true') continue;
+        await handleDraftCardSubmit(null, form);
+      }}
+
+      if (saveAllBtn) {{
+        saveAllBtn.innerText = '✅ 모든 카드 저장 완료';
+        saveAllBtn.style.background = '#10b981';
+      }}
+    }}
+
+    function checkAllSaved() {{
+      const unsaved = document.querySelectorAll('.draft-card:not([data-saved="true"])');
+      if (unsaved.length === 0) {{
+        const banner = document.getElementById('saveAllStatusBanner');
+        if (banner) {{
+          banner.innerHTML = '🎉 모든 Draft Card가 Study Card에 성공적으로 저장되었습니다! <a href="/" style="color:#10b981; text-decoration:underline; margin-left: 0.5rem; font-weight:700;">홈 (Home)으로 이동하기 →</a>';
+          banner.style.display = 'block';
+        }}
+        const saveAllBtn = document.getElementById('saveAllDraftsBtn');
+        if (saveAllBtn) {{
+          saveAllBtn.innerText = '✅ 모든 카드 저장 완료';
+          saveAllBtn.style.background = '#10b981';
+          saveAllBtn.disabled = true;
+        }}
+      }}
+    }}
+  </script>
 </body>
 </html>"#,
         user_input = escape_html(user_input),
