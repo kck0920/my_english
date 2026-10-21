@@ -93,43 +93,73 @@ impl AiProvider for NoopAiProvider {
 
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-2.5-pro";
 
+pub fn to_standard_lowercase_json_schema(val: &serde_json::Value) -> serde_json::Value {
+    match val {
+        serde_json::Value::Object(map) => {
+            let mut new_map = serde_json::Map::new();
+            for (k, v) in map {
+                if k == "type" {
+                    if let Some(s) = v.as_str() {
+                        new_map.insert(k.clone(), serde_json::Value::String(s.to_lowercase()));
+                    } else {
+                        new_map.insert(k.clone(), to_standard_lowercase_json_schema(v));
+                    }
+                } else {
+                    new_map.insert(k.clone(), to_standard_lowercase_json_schema(v));
+                }
+            }
+            serde_json::Value::Object(new_map)
+        }
+        serde_json::Value::Array(arr) => {
+            serde_json::Value::Array(arr.iter().map(to_standard_lowercase_json_schema).collect())
+        }
+        _ => val.clone(),
+    }
+}
+
 pub fn draft_cards_json_schema() -> serde_json::Value {
     serde_json::json!({
-        "type": "ARRAY",
-        "items": {
-            "type": "OBJECT",
-            "properties": {
-                "chunk": { "type": "STRING" },
-                "surface_chunk": { "type": "STRING" },
-                "context_sentence": { "type": "STRING" },
-                "korean_meaning": { "type": "STRING" },
-                "extra_examples": {
-                    "type": "ARRAY",
-                    "items": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "english": { "type": "STRING" },
-                            "korean": { "type": "STRING" }
+        "type": "OBJECT",
+        "properties": {
+            "cards": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "chunk": { "type": "STRING" },
+                        "surface_chunk": { "type": "STRING" },
+                        "context_sentence": { "type": "STRING" },
+                        "korean_meaning": { "type": "STRING" },
+                        "extra_examples": {
+                            "type": "ARRAY",
+                            "items": {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "english": { "type": "STRING" },
+                                    "korean": { "type": "STRING" }
+                                },
+                                "required": ["english", "korean"]
+                            }
                         },
-                        "required": ["english", "korean"]
-                    }
-                },
-                "nuance_note": { "type": "STRING" },
-                "tags": {
-                    "type": "ARRAY",
-                    "items": { "type": "STRING" }
+                        "nuance_note": { "type": "STRING" },
+                        "tags": {
+                            "type": "ARRAY",
+                            "items": { "type": "STRING" }
+                        }
+                    },
+                    "required": [
+                        "chunk",
+                        "surface_chunk",
+                        "context_sentence",
+                        "korean_meaning",
+                        "extra_examples",
+                        "nuance_note",
+                        "tags"
+                    ]
                 }
-            },
-            "required": [
-                "chunk",
-                "surface_chunk",
-                "context_sentence",
-                "korean_meaning",
-                "extra_examples",
-                "nuance_note",
-                "tags"
-            ]
-        }
+            }
+        },
+        "required": ["cards"]
     })
 }
 
@@ -453,7 +483,8 @@ impl AgyCliProvider {
     }
 
     async fn invoke_cli(&self, prompt: &str, schema: &serde_json::Value) -> Result<String> {
-        let schema_str = serde_json::to_string(schema)?;
+        let standard_schema = to_standard_lowercase_json_schema(schema);
+        let schema_str = serde_json::to_string(&standard_schema)?;
         let output = tokio::process::Command::new(&self.binary)
             .arg("-p")
             .arg(prompt)
