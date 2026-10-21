@@ -239,6 +239,7 @@ pub async fn tts_proxy_handler(
                 StatusCode::OK,
                 [
                     (header::CONTENT_TYPE, "audio/mpeg"),
+                    (header::ACCEPT_RANGES, "bytes"),
                     (header::CACHE_CONTROL, "public, max-age=86400"),
                 ],
                 Bytes::from(bytes),
@@ -511,6 +512,9 @@ pub async fn audio_gym_page(
             isPlaying = false;
             playBtn.innerText = '▶ 재생';
             audio.pause();
+            if ('speechSynthesis' in window) {{
+                window.speechSynthesis.cancel();
+            }}
             if (stepTimer) clearInterval(stepTimer);
             releaseWakeLock();
         }}
@@ -545,19 +549,65 @@ pub async fn audio_gym_page(
 
         function playTts(text, lang) {{
             return new Promise((resolve) => {{
-                audio.pause();
-                audio.currentTime = 0;
-                audio.src = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
-                audio.load();
-                audio.onended = () => resolve();
-                audio.onerror = (e) => {{
-                    console.error('Audio playback error', e);
-                    resolve();
+                if (!isPlaying) return resolve();
+
+                let finished = false;
+                const done = () => {{
+                    if (!finished) {{
+                        finished = true;
+                        resolve();
+                    }}
                 }};
-                audio.play().catch(err => {{
-                    console.warn('Audio play() error:', err);
-                    resolve();
-                }});
+
+                const fallbackWebSpeech = () => {{
+                    if (!isPlaying) return done();
+                    if ('speechSynthesis' in window) {{
+                        window.speechSynthesis.cancel();
+                        const u = new SpeechSynthesisUtterance(text);
+                        u.lang = (lang === 'ko') ? 'ko-KR' : 'en-US';
+                        u.rate = (lang === 'ko') ? 1.0 : 0.95;
+                        u.onend = () => done();
+                        u.onerror = (e) => {{
+                            console.warn('SpeechSynthesis error:', e);
+                            done();
+                        }};
+                        window.speechSynthesis.speak(u);
+                    }} else {{
+                        done();
+                    }}
+                }};
+
+                try {{
+                    const url = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
+                    const s = new Audio(url);
+                    let timeoutId = setTimeout(() => {{
+                        console.warn('Audio play timed out after 7s, falling back');
+                        s.pause();
+                        fallbackWebSpeech();
+                    }}, 7000);
+
+                    s.onended = () => {{
+                        clearTimeout(timeoutId);
+                        done();
+                    }};
+                    s.onerror = (e) => {{
+                        clearTimeout(timeoutId);
+                        console.warn('Server TTS failed, falling back to Web Speech API', e);
+                        fallbackWebSpeech();
+                    }};
+
+                    const p = s.play();
+                    if (p && typeof p.catch === 'function') {{
+                        p.catch((err) => {{
+                            clearTimeout(timeoutId);
+                            console.warn('Audio play() rejected, falling back to Web Speech API', err);
+                            fallbackWebSpeech();
+                        }});
+                    }}
+                }} catch (e) {{
+                    console.warn('Audio object initialization failed, falling back', e);
+                    fallbackWebSpeech();
+                }}
             }});
         }}
 
@@ -641,7 +691,10 @@ pub async fn audio_gym_page(
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/api/tts", get(tts_proxy_handler))
         .route("/audio-gym", get(audio_gym_page))
         .route("/api/audio-gym/playlist", get(audio_gym_playlist_api))
+}
+
+pub fn public_routes() -> Router<AppState> {
+    Router::new().route("/api/tts", get(tts_proxy_handler))
 }
