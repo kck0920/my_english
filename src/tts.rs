@@ -509,24 +509,16 @@ pub async fn audio_gym_page(
             }}
         }}
 
-        let currentAudioResolve = null;
+        let audioCtx = null;
+        let currentSourceNode = null;
 
-        audio.onended = () => {{
-            if (currentAudioResolve) {{
-                const fn = currentAudioResolve;
-                currentAudioResolve = null;
-                fn();
+        function getAudioContext() {{
+            if (!audioCtx) {{
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContextClass();
             }}
-        }};
-
-        audio.onerror = (e) => {{
-            console.warn('Audio playback error, resolving step', e);
-            if (currentAudioResolve) {{
-                const fn = currentAudioResolve;
-                currentAudioResolve = null;
-                fn();
-            }}
-        }};
+            return audioCtx;
+        }}
 
         function togglePlay() {{
             if (isPlaying) {{
@@ -539,11 +531,12 @@ pub async fn audio_gym_page(
         function pause() {{
             isPlaying = false;
             playBtn.innerText = '▶ 재생';
-            audio.pause();
-            if (currentAudioResolve) {{
-                const fn = currentAudioResolve;
-                currentAudioResolve = null;
-                fn();
+            if (currentSourceNode) {{
+                try {{ currentSourceNode.stop(); }} catch(e) {{}}
+                currentSourceNode = null;
+            }}
+            if (audioCtx && audioCtx.state === 'running') {{
+                audioCtx.suspend().catch(() => {{}});
             }}
             if ('speechSynthesis' in window) {{
                 window.speechSynthesis.cancel();
@@ -552,12 +545,17 @@ pub async fn audio_gym_page(
             releaseWakeLock();
         }}
 
-        function play() {{
+        async function play() {{
             if (playlist.length === 0) return;
             isPlaying = true;
             playBtn.innerText = '⏸ 일시정지';
             acquireWakeLock();
-            audio.play().catch(() => {{}});
+
+            const ctx = getAudioContext();
+            if (ctx.state === 'suspended') {{
+                await ctx.resume().catch(() => {{}});
+            }}
+
             runCurrentStep();
         }}
 
@@ -582,13 +580,14 @@ pub async fn audio_gym_page(
         }}
 
         function playTts(text, lang) {{
-            return new Promise((resolve) => {{
+            return new Promise(async (resolve) => {{
                 if (!isPlaying) return resolve();
 
                 let finished = false;
                 const done = () => {{
                     if (!finished) {{
                         finished = true;
+                        currentSourceNode = null;
                         resolve();
                     }}
                 }};
@@ -611,17 +610,40 @@ pub async fn audio_gym_page(
                     }}
                 }};
 
-                currentAudioResolve = done;
+                try {{
+                    const ctx = getAudioContext();
+                    if (ctx.state === 'suspended') {{
+                        await ctx.resume().catch(() => {{}});
+                    }}
 
-                const url = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
-                audio.src = url;
+                    const url = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
+                    const res = await fetch(url);
+                    if (!res.ok) {{
+                        throw new Error(`TTS HTTP error: ${{res.status}}`);
+                    }}
 
-                const p = audio.play();
-                if (p && typeof p.catch === 'function') {{
-                    p.catch((err) => {{
-                        console.warn('audio.play() rejected, falling back to Web Speech API', err);
-                        fallbackWebSpeech();
+                    const arrayBuffer = await res.arrayBuffer();
+                    if (!isPlaying) return done();
+
+                    const audioBuffer = await new Promise((decResolve, decReject) => {{
+                        ctx.decodeAudioData(arrayBuffer, decResolve, decReject);
                     }});
+
+                    if (!isPlaying) return done();
+
+                    const source = ctx.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(ctx.destination);
+                    currentSourceNode = source;
+
+                    source.onended = () => {{
+                        done();
+                    }};
+
+                    source.start(0);
+                }} catch (err) {{
+                    console.warn('Web Audio API playback failed, falling back to Web Speech API:', err);
+                    fallbackWebSpeech();
                 }}
             }});
         }}
@@ -632,7 +654,7 @@ pub async fn audio_gym_page(
             updateProgress();
 
             currentStep = 'ko';
-            stepIndicator.innerText = 'STEP 1: 한국어 의미 듣기';
+            stepIndicator.innerText = 'STEP 1: 한국어 의미 듣기 🔊';
             koreanText.innerText = card.korean_meaning;
             timerDisplay.style.display = 'none';
             chunkText.style.display = 'none';
@@ -642,7 +664,7 @@ pub async fn audio_gym_page(
             if (!isPlaying) return;
 
             currentStep = 'gap';
-            stepIndicator.innerText = 'STEP 2: 직접 영어로 말해보세요! (Think & Speak)';
+            stepIndicator.innerText = 'STEP 2: 직접 영어로 말해보세요! (Think & Speak) ⏱️';
             timerDisplay.style.display = 'block';
             let remain = gapSeconds;
             timerDisplay.innerText = remain;
@@ -662,7 +684,7 @@ pub async fn audio_gym_page(
             if (!isPlaying) return;
 
             currentStep = 'en1';
-            stepIndicator.innerText = 'STEP 3: 원어민 영어 확인 (1/2)';
+            stepIndicator.innerText = 'STEP 3: 원어민 영어 확인 (1/2) 🔊';
             chunkText.style.display = 'block';
             chunkText.innerText = card.chunk;
             sentenceText.style.display = 'block';
@@ -675,7 +697,7 @@ pub async fn audio_gym_page(
             if (!isPlaying) return;
 
             currentStep = 'en2';
-            stepIndicator.innerText = 'STEP 4: 입으로 따라 말하기 (Shadowing 2/2)';
+            stepIndicator.innerText = 'STEP 4: 입으로 따라 말하기 (Shadowing 2/2) 🔊';
             await playTts(card.context_sentence, 'en');
             if (!isPlaying) return;
 
