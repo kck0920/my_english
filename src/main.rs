@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
     let database_url =
         std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://my_english.db".to_string());
     let app_passcode =
-        std::env::var("APP_PASSCODE").unwrap_or_else(|_| "changeme".to_string());
+        std::env::var("APP_PASSCODE").unwrap_or_else(|_| "1234".to_string());
     let cookie_secret = std::env::var("COOKIE_SECRET")
         .unwrap_or_else(|_| format!("secret-key-{}", app_passcode));
     let port: u16 = std::env::var("PORT")
