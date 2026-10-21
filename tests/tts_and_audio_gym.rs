@@ -227,6 +227,8 @@ async fn audio_gym_page_and_playlist_api_filters_cards() {
     let html = String::from_utf8(gym_page.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
     assert!(html.contains("Audio Gym"));
     assert!(html.contains("Think & Speak"));
+    assert!(html.contains("오늘 복습 대상: <strong>2</strong>개 (전체: 2개)"));
+    assert!(html.contains("오늘 복습 카드 (2)"));
 
     // 2. GET /api/audio-gym/playlist?filter=due returns both cards (new cards default to due_date <= now)
     let playlist_res = app

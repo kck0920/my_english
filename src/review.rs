@@ -850,7 +850,7 @@ pub fn render_review_card_page(
   </div>
   <div style="display: flex; align-items: center; gap: 0.5rem;">
     <p class="context-sentence" style="font-size: 1.15rem; font-weight: 600; margin: 0;">{context_sentence}</p>
-    <button type="button" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" onclick="new Audio('/api/tts?text={context_sentence_enc}&lang=en').play()">🔊</button>
+    <button type="button" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" onclick="playReviewAudio(this, decodeURIComponent('{context_sentence_enc}'))">🔊</button>
   </div>
   <p class="korean-meaning">{korean_meaning}</p>
   {examples_html}
@@ -928,6 +928,56 @@ pub fn render_review_card_page(
     </header>
     {body_section}
   </div>
+  <script>
+    function playReviewAudio(btn, text) {{
+      if (!text) return;
+      const orig = btn ? btn.innerText : '🔊';
+      if (btn) btn.innerText = '⏳';
+      let done = false;
+      const finish = () => {{
+        if (!done) {{
+          done = true;
+          if (btn) btn.innerText = orig;
+        }}
+      }};
+      try {{
+        const audio = new Audio('/api/tts?text=' + encodeURIComponent(text) + '&lang=en');
+        audio.onended = finish;
+        audio.onerror = () => {{
+          if ('speechSynthesis' in window) {{
+            try {{
+              const u = new SpeechSynthesisUtterance(text);
+              u.lang = 'en-US';
+              u.onend = finish;
+              u.onerror = finish;
+              window.speechSynthesis.speak(u);
+            }} catch (e) {{ finish(); }}
+          }} else {{
+            finish();
+          }}
+        }};
+        const p = audio.play();
+        if (p !== undefined) {{
+          p.catch(() => {{
+            audio.onerror();
+          }});
+        }}
+      }} catch (err) {{
+        if ('speechSynthesis' in window) {{
+          try {{
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = 'en-US';
+            u.onend = finish;
+            u.onerror = finish;
+            window.speechSynthesis.speak(u);
+          }} catch (e) {{ finish(); }}
+        }} else {{
+          finish();
+        }}
+      }}
+      setTimeout(finish, 6000);
+    }}
+  </script>
 </body>
 </html>"#
     )

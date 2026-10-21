@@ -310,7 +310,7 @@ pub async fn audio_gym_playlist_api(
         }
     };
 
-    let now_str = chrono::Utc::now().to_rfc3339();
+    let now_str = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
     let filtered_cards: Vec<StudyCard> = match filter {
         "all" => all_cards,
@@ -350,7 +350,20 @@ pub async fn audio_gym_page(
     State(state): State<AppState>,
     Query(query): Query<AudioGymQuery>,
 ) -> Response {
-    let filter = query.filter.as_deref().unwrap_or("due");
+    let all_cards = list_study_cards(&state.pool).await.unwrap_or_default();
+    let all_count = all_cards.len();
+    let now_str = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let due_count = all_cards
+        .iter()
+        .filter(|c| c.due_date.as_str() <= now_str.as_str() || c.review_count == 0)
+        .count();
+    let lapsed_count = all_cards
+        .iter()
+        .filter(|c| c.lapse_count > 0 || c.srs_stage <= 1)
+        .count();
+
+    let default_filter = if due_count > 0 { "due" } else { "all" };
+    let filter = query.filter.as_deref().unwrap_or(default_filter);
     let tag = query.tag.as_deref().unwrap_or("");
     let gap = query.gap.clamp(1, 15);
     let gender = if query.gender.eq_ignore_ascii_case("male") {
@@ -358,8 +371,6 @@ pub async fn audio_gym_page(
     } else {
         "female"
     };
-
-    let due_count = crate::cards::count_due_cards(&state.pool).await.unwrap_or(0);
 
     let html = format!(
         r#"<!DOCTYPE html>
@@ -393,7 +404,7 @@ pub async fn audio_gym_page(
                 <h1 style="margin: 0.25rem 0 0 0; font-size: 1.5rem;">🎧 Audio Gym</h1>
             </div>
             <div style="font-size: 0.875rem; color: var(--text-muted);">
-                오늘 복습 대상: <strong>{due_count}</strong>개
+                오늘 복습 대상: <strong>{due_count}</strong>개 (전체: {all_count}개)
             </div>
         </div>
 
@@ -402,8 +413,8 @@ pub async fn audio_gym_page(
                 <label>재생 필터: </label>
                 <select id="filterSelect" onchange="applyFilters()">
                     <option value="due" {sel_due}>오늘 복습 카드 ({due_count})</option>
-                    <option value="lapsed" {sel_lapsed}>자주 틀린 카드</option>
-                    <option value="all" {sel_all}>전체 카드</option>
+                    <option value="lapsed" {sel_lapsed}>자주 틀린 카드 ({lapsed_count})</option>
+                    <option value="all" {sel_all}>전체 카드 ({all_count})</option>
                 </select>
             </div>
             <div>
@@ -438,17 +449,19 @@ pub async fn audio_gym_page(
         </div>
     </div>
 
-    <audio id="ttsAudio" preload="auto"></audio>
+    <audio id="ttsAudio" playsinline preload="auto"></audio>
 
     <script>
         let playlist = [];
         let currentIndex = 0;
         let isPlaying = false;
+        let currentRunId = 0;
         let gapSeconds = {gap};
         let voiceGender = '{gender}';
         let currentStep = 'idle';
         let stepTimer = null;
         let wakeLock = null;
+        let currentUtterance = null;
 
         const audio = document.getElementById('ttsAudio');
         const playBtn = document.getElementById('playBtn');
@@ -464,14 +477,23 @@ pub async fn audio_gym_page(
             gapSeconds = parseInt(document.getElementById('gapInput').value, 10) || 3;
             voiceGender = document.getElementById('genderSelect').value;
             try {{
-                const res = await fetch(`/api/audio-gym/playlist?filter=${{filter}}&tag={tag}`);
+                const res = await fetch(`/api/audio-gym/playlist?filter=${{encodeURIComponent(filter)}}&tag={tag}`);
+                if (!res.ok) {{
+                    throw new Error(`Playlist HTTP error: ${{res.status}}`);
+                }}
                 playlist = await res.json();
+                currentIndex = 0;
                 updateProgress();
                 if (playlist.length === 0) {{
-                    koreanText.innerText = '재생할 카드가 없습니다.';
+                    if (filter === 'due') {{
+                        koreanText.innerHTML = '오늘 복습할 카드가 없습니다.<br><button class="gym-btn gym-btn-secondary" style="margin-top:0.75rem;font-size:0.875rem;" onclick="switchToAll()">전체 카드로 연습하기</button>';
+                    }} else {{
+                        koreanText.innerText = '재생 가능한 카드가 없습니다.';
+                    }}
                     playBtn.disabled = true;
                 }} else {{
                     playBtn.disabled = false;
+                    koreanText.innerText = '▶ 시작하기 버튼을 누르면 자동 재생됩니다.';
                 }}
             }} catch (err) {{
                 console.error(err);
@@ -479,11 +501,16 @@ pub async fn audio_gym_page(
             }}
         }}
 
+        function switchToAll() {{
+            document.getElementById('filterSelect').value = 'all';
+            applyFilters();
+        }}
+
         function applyFilters() {{
             const filter = document.getElementById('filterSelect').value;
             const gap = document.getElementById('gapInput').value;
             const gender = document.getElementById('genderSelect').value;
-            window.location.href = `/audio-gym?filter=${{filter}}&gap=${{gap}}&gender=${{gender}}&tag={tag}`;
+            window.location.href = `/audio-gym?filter=${{encodeURIComponent(filter)}}&gap=${{encodeURIComponent(gap)}}&gender=${{encodeURIComponent(gender)}}&tag={tag}`;
         }}
 
         function updateProgress() {{
@@ -509,17 +536,6 @@ pub async fn audio_gym_page(
             }}
         }}
 
-        let audioCtx = null;
-        let currentSourceNode = null;
-
-        function getAudioContext() {{
-            if (!audioCtx) {{
-                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-                audioCtx = new AudioContextClass();
-            }}
-            return audioCtx;
-        }}
-
         function togglePlay() {{
             if (isPlaying) {{
                 pause();
@@ -530,126 +546,182 @@ pub async fn audio_gym_page(
 
         function pause() {{
             isPlaying = false;
+            currentRunId++;
             playBtn.innerText = '▶ 재생';
-            if (currentSourceNode) {{
-                try {{ currentSourceNode.stop(); }} catch(e) {{}}
-                currentSourceNode = null;
-            }}
-            if (audioCtx && audioCtx.state === 'running') {{
-                audioCtx.suspend().catch(() => {{}});
+            if (audio) {{
+                try {{
+                    audio.pause();
+                    audio.currentTime = 0;
+                }} catch (e) {{}}
             }}
             if ('speechSynthesis' in window) {{
-                window.speechSynthesis.cancel();
+                try {{
+                    window.speechSynthesis.cancel();
+                }} catch (e) {{}}
             }}
-            if (stepTimer) clearInterval(stepTimer);
+            if (stepTimer) {{
+                clearInterval(stepTimer);
+                stepTimer = null;
+            }}
             releaseWakeLock();
         }}
 
         async function play() {{
             if (playlist.length === 0) return;
             isPlaying = true;
+            currentRunId++;
+            const runId = currentRunId;
             playBtn.innerText = '⏸ 일시정지';
             acquireWakeLock();
 
-            const ctx = getAudioContext();
-            if (ctx.state === 'suspended') {{
-                await ctx.resume().catch(() => {{}});
+            // Unlock HTML5 Audio during user click gesture
+            try {{
+                audio.play().then(() => {{
+                    audio.pause();
+                    audio.currentTime = 0;
+                }}).catch(() => {{}});
+            }} catch (e) {{}}
+
+            if ('speechSynthesis' in window) {{
+                try {{
+                    window.speechSynthesis.resume();
+                }} catch (e) {{}}
             }}
 
-            runCurrentStep();
+            runCurrentStep(runId);
         }}
 
         function prevCard() {{
             if (currentIndex > 0) {{
                 currentIndex--;
-                currentStep = 'ko';
-                runCurrentStep();
+                if (isPlaying) {{
+                    currentRunId++;
+                    if (stepTimer) {{ clearInterval(stepTimer); stepTimer = null; }}
+                    if (audio) {{ try {{ audio.pause(); }} catch (e) {{}} }}
+                    runCurrentStep(currentRunId);
+                }} else {{
+                    updateProgress();
+                    const card = playlist[currentIndex];
+                    koreanText.innerText = card.korean_meaning;
+                    chunkText.innerText = card.chunk;
+                    sentenceText.innerText = card.context_sentence;
+                }}
             }}
         }}
 
         function nextCard() {{
             if (currentIndex < playlist.length - 1) {{
                 currentIndex++;
-                currentStep = 'ko';
-                runCurrentStep();
+                if (isPlaying) {{
+                    currentRunId++;
+                    if (stepTimer) {{ clearInterval(stepTimer); stepTimer = null; }}
+                    if (audio) {{ try {{ audio.pause(); }} catch (e) {{}} }}
+                    runCurrentStep(currentRunId);
+                }} else {{
+                    updateProgress();
+                    const card = playlist[currentIndex];
+                    koreanText.innerText = card.korean_meaning;
+                    chunkText.innerText = card.chunk;
+                    sentenceText.innerText = card.context_sentence;
+                }}
             }} else {{
                 pause();
-                stepIndicator.innerText = '완료';
+                stepIndicator.innerText = '완료 🎉';
                 koreanText.innerText = '모든 카드를 완료했습니다! 🎉';
             }}
         }}
 
-        function playTts(text, lang) {{
+        function playTts(text, lang, runId) {{
             return new Promise(async (resolve) => {{
-                if (!isPlaying) return resolve();
+                if (!isPlaying || runId !== currentRunId) return resolve();
 
                 let finished = false;
+                let timeoutId = null;
+
                 const done = () => {{
                     if (!finished) {{
                         finished = true;
-                        currentSourceNode = null;
+                        if (timeoutId) clearTimeout(timeoutId);
+                        audio.onended = null;
+                        audio.onerror = null;
                         resolve();
                     }}
                 }};
 
+                // Safety timeout: Maximum 8 seconds per audio chunk
+                timeoutId = setTimeout(() => {{
+                    console.warn('TTS safety timeout triggered, proceeding to next step');
+                    try {{ audio.pause(); }} catch (e) {{}}
+                    done();
+                }}, 8000);
+
                 const fallbackWebSpeech = () => {{
-                    if (!isPlaying) return done();
+                    if (!isPlaying || runId !== currentRunId || finished) return done();
                     if ('speechSynthesis' in window) {{
-                        window.speechSynthesis.cancel();
-                        const u = new SpeechSynthesisUtterance(text);
-                        u.lang = (lang === 'ko') ? 'ko-KR' : 'en-US';
-                        u.rate = (lang === 'ko') ? 1.0 : 0.95;
-                        u.onend = () => done();
-                        u.onerror = (e) => {{
-                            console.warn('SpeechSynthesis error:', e);
+                        try {{
+                            const u = new SpeechSynthesisUtterance(text);
+                            u.lang = (lang === 'ko') ? 'ko-KR' : 'en-US';
+                            u.rate = (lang === 'ko') ? 1.0 : 0.95;
+                            currentUtterance = u;
+                            u.onend = () => {{
+                                currentUtterance = null;
+                                done();
+                            }};
+                            u.onerror = (e) => {{
+                                console.warn('SpeechSynthesis error:', e);
+                                currentUtterance = null;
+                                done();
+                            }};
+                            window.speechSynthesis.speak(u);
+                        }} catch (e) {{
                             done();
-                        }};
-                        window.speechSynthesis.speak(u);
+                        }}
                     }} else {{
                         done();
                     }}
                 }};
 
                 try {{
-                    const ctx = getAudioContext();
-                    if (ctx.state === 'suspended') {{
-                        await ctx.resume().catch(() => {{}});
-                    }}
-
                     const url = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
                     const res = await fetch(url);
                     if (!res.ok) {{
                         throw new Error(`TTS HTTP error: ${{res.status}}`);
                     }}
 
-                    const arrayBuffer = await res.arrayBuffer();
-                    if (!isPlaying) return done();
+                    const blob = await res.blob();
+                    if (!isPlaying || runId !== currentRunId || finished) return done();
 
-                    const audioBuffer = await new Promise((decResolve, decReject) => {{
-                        ctx.decodeAudioData(arrayBuffer, decResolve, decReject);
-                    }});
+                    const blobUrl = URL.createObjectURL(blob);
+                    audio.src = blobUrl;
 
-                    if (!isPlaying) return done();
-
-                    const source = ctx.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(ctx.destination);
-                    currentSourceNode = source;
-
-                    source.onended = () => {{
+                    audio.onended = () => {{
+                        URL.revokeObjectURL(blobUrl);
                         done();
                     }};
 
-                    source.start(0);
+                    audio.onerror = (err) => {{
+                        console.warn('Audio playback error:', err);
+                        URL.revokeObjectURL(blobUrl);
+                        fallbackWebSpeech();
+                    }};
+
+                    const p = audio.play();
+                    if (p !== undefined) {{
+                        p.catch((err) => {{
+                            console.warn('audio.play() rejected:', err);
+                            URL.revokeObjectURL(blobUrl);
+                            fallbackWebSpeech();
+                        }});
+                    }}
                 }} catch (err) {{
-                    console.warn('Web Audio API playback failed, falling back to Web Speech API:', err);
+                    console.warn('TTS fetch failed, falling back to Web Speech API:', err);
                     fallbackWebSpeech();
                 }}
             }});
         }}
 
-        async function runCurrentStep() {{
-            if (!isPlaying || currentIndex >= playlist.length) return;
+        async function runCurrentStep(runId) {{
+            if (!isPlaying || runId !== currentRunId || currentIndex >= playlist.length) return;
             const card = playlist[currentIndex];
             updateProgress();
 
@@ -660,8 +732,8 @@ pub async fn audio_gym_page(
             chunkText.style.display = 'none';
             sentenceText.style.display = 'none';
 
-            await playTts(card.korean_meaning, 'ko');
-            if (!isPlaying) return;
+            await playTts(card.korean_meaning, 'ko', runId);
+            if (!isPlaying || runId !== currentRunId) return;
 
             currentStep = 'gap';
             stepIndicator.innerText = 'STEP 2: 직접 영어로 말해보세요! (Think & Speak) ⏱️';
@@ -671,9 +743,15 @@ pub async fn audio_gym_page(
 
             await new Promise(resolve => {{
                 stepTimer = setInterval(() => {{
+                    if (!isPlaying || runId !== currentRunId) {{
+                        clearInterval(stepTimer);
+                        stepTimer = null;
+                        return resolve();
+                    }}
                     remain--;
                     if (remain <= 0) {{
                         clearInterval(stepTimer);
+                        stepTimer = null;
                         timerDisplay.style.display = 'none';
                         resolve();
                     }} else {{
@@ -681,7 +759,7 @@ pub async fn audio_gym_page(
                     }}
                 }}, 1000);
             }});
-            if (!isPlaying) return;
+            if (!isPlaying || runId !== currentRunId) return;
 
             currentStep = 'en1';
             stepIndicator.innerText = 'STEP 3: 원어민 영어 확인 (1/2) 🔊';
@@ -690,21 +768,31 @@ pub async fn audio_gym_page(
             sentenceText.style.display = 'block';
             sentenceText.innerText = card.context_sentence;
 
-            await playTts(card.context_sentence, 'en');
-            if (!isPlaying) return;
+            await playTts(card.context_sentence, 'en', runId);
+            if (!isPlaying || runId !== currentRunId) return;
 
             await new Promise(r => setTimeout(r, 600));
-            if (!isPlaying) return;
+            if (!isPlaying || runId !== currentRunId) return;
 
             currentStep = 'en2';
             stepIndicator.innerText = 'STEP 4: 입으로 따라 말하기 (Shadowing 2/2) 🔊';
-            await playTts(card.context_sentence, 'en');
-            if (!isPlaying) return;
+            await playTts(card.context_sentence, 'en', runId);
+            if (!isPlaying || runId !== currentRunId) return;
 
             await new Promise(r => setTimeout(r, 1200));
-            if (!isPlaying) return;
+            if (!isPlaying || runId !== currentRunId) return;
 
-            nextCard();
+            if (currentIndex < playlist.length - 1) {{
+                currentIndex++;
+                runCurrentStep(runId);
+            }} else {{
+                pause();
+                stepIndicator.innerText = '완료 🎉';
+                koreanText.innerText = '모든 카드를 완료했습니다! 🎉';
+                timerDisplay.style.display = 'none';
+                chunkText.style.display = 'none';
+                sentenceText.style.display = 'none';
+            }}
         }}
 
         init();
@@ -712,7 +800,9 @@ pub async fn audio_gym_page(
 </body>
 </html>"#,
         css = APP_CSS,
+        all_count = all_count,
         due_count = due_count,
+        lapsed_count = lapsed_count,
         gap = gap,
         gender = gender,
         tag = escape_html(tag),
