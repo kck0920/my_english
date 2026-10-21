@@ -431,8 +431,7 @@ EOF
 
     let logged_args = std::fs::read_to_string(&args_log_path).unwrap();
     assert!(logged_args.contains("-p"));
-    assert!(logged_args.contains("--output-format json"));
-    assert!(logged_args.contains("--json-schema"));
+    assert!(logged_args.contains("--disable-slash-commands"));
 }
 
 #[derive(Clone)]

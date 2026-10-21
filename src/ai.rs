@@ -196,9 +196,56 @@ pub fn strip_markdown_code_fence(raw: &str) -> &str {
     trimmed
 }
 
+pub fn extract_json_slice(raw: &str) -> &str {
+    let trimmed = raw.trim();
+    if let Some(start) = trimmed.find("```json") {
+        let rest = &trimmed[start + 7..];
+        if let Some(end) = rest.find("```") {
+            return rest[..end].trim();
+        }
+    }
+    if let Some(start) = trimmed.find("```") {
+        let rest = &trimmed[start + 3..];
+        let rest = if let Some(nl) = rest.find('\n') { &rest[nl + 1..] } else { rest };
+        if let Some(end) = rest.find("```") {
+            return rest[..end].trim();
+        }
+    }
+
+    let start_obj = trimmed.find('{');
+    let start_arr = trimmed.find('[');
+    let start = match (start_obj, start_arr) {
+        (Some(o), Some(a)) => Some(o.min(a)),
+        (Some(o), None) => Some(o),
+        (None, Some(a)) => Some(a),
+        (None, None) => None,
+    };
+
+    if let Some(s) = start {
+        return trimmed[s..].trim();
+    }
+
+    trimmed
+}
+
 pub fn parse_draft_cards_from_json_str(raw: &str) -> Result<Vec<DraftCard>> {
-    let cleaned = strip_markdown_code_fence(raw);
-    let val: serde_json::Value = serde_json::from_str(cleaned)?;
+    let json_text = extract_json_slice(raw);
+    if json_text.trim().is_empty() {
+        anyhow::bail!("AI 응답에서 유효한 JSON을 찾을 수 없습니다. (원문: {})", raw.chars().take(200).collect::<String>());
+    }
+
+    // Deserializer::into_iter()를 사용하여 trailing characters(뒤에 붙은 텍스트/안내문구)가 있어도
+    // 첫 번째 온전한 JSON 엔티티만 안전하게 파싱합니다.
+    let de = serde_json::Deserializer::from_str(json_text);
+    let val: serde_json::Value = match de.into_iter::<serde_json::Value>().next() {
+        Some(Ok(v)) => v,
+        Some(Err(e)) => {
+            anyhow::bail!("AI 응답 JSON 파싱 실패 ({e}): {}", json_text.chars().take(200).collect::<String>());
+        }
+        None => {
+            anyhow::bail!("AI 응답이 비어 있습니다.");
+        }
+    };
 
     let mut cards: Vec<DraftCard> = if val.is_array() {
         serde_json::from_value(val)?
@@ -216,7 +263,7 @@ pub fn parse_draft_cards_from_json_str(raw: &str) -> Result<Vec<DraftCard>> {
     {
         return parse_draft_cards_from_json_str(inner_str);
     } else {
-        anyhow::bail!("Unexpected JSON structure for DraftCards")
+        anyhow::bail!("Unexpected JSON structure for DraftCards: {json_text}")
     };
 
     for card in &mut cards {
@@ -462,6 +509,7 @@ impl AiProvider for CloudCodeOAuthProvider {
 #[derive(Debug, Clone)]
 pub struct AgyCliProvider {
     binary: String,
+    model: Option<String>,
 }
 
 impl Default for AgyCliProvider {
@@ -473,34 +521,51 @@ impl Default for AgyCliProvider {
 impl AgyCliProvider {
     pub fn new() -> Self {
         let binary = std::env::var("AGY_CLI_BIN").unwrap_or_else(|_| "agy".to_string());
-        Self { binary }
+        let model = std::env::var("AGY_CLI_MODEL")
+            .ok()
+            .or_else(|| Some("gemini-3.8-flash-low".to_string()));
+        Self { binary, model }
     }
 
     pub fn with_binary(binary: impl Into<String>) -> Self {
         Self {
             binary: binary.into(),
+            model: Some("gemini-3.8-flash-low".to_string()),
         }
     }
 
-    async fn invoke_cli(&self, prompt: &str, schema: &serde_json::Value) -> Result<String> {
-        let standard_schema = to_standard_lowercase_json_schema(schema);
-        let schema_str = serde_json::to_string(&standard_schema)?;
-        let output = tokio::process::Command::new(&self.binary)
-            .arg("-p")
-            .arg(prompt)
-            .arg("--output-format")
-            .arg("json")
-            .arg("--json-schema")
-            .arg(&schema_str)
-            .output()
-            .await?;
+    pub fn with_binary_and_model(binary: impl Into<String>, model: Option<String>) -> Self {
+        Self {
+            binary: binary.into(),
+            model,
+        }
+    }
+
+    async fn invoke_cli(&self, prompt: &str, _schema: &serde_json::Value) -> Result<String> {
+        let mut cmd = tokio::process::Command::new(&self.binary);
+        cmd.arg("-p").arg(prompt);
+        cmd.arg("--disable-slash-commands");
+
+        if let Some(ref m) = self.model {
+            let trimmed = m.trim();
+            if !trimmed.is_empty() {
+                cmd.arg("--model").arg(trimmed);
+            }
+        }
+
+        let output = cmd.output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("agy CLI failed with status {}: {}", output.status, stderr);
+            anyhow::bail!("agy CLI 실행 실패 (exit code: {}): {}", output.status, stderr);
         }
 
-        Ok(String::from_utf8(output.stdout)?)
+        let raw = String::from_utf8_lossy(&output.stdout).to_string();
+        if raw.trim().is_empty() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("agy CLI가 빈 결과를 반환했습니다. (stderr: {stderr})");
+        }
+        Ok(raw)
     }
 }
 
@@ -520,7 +585,7 @@ impl AiProvider for AgyCliProvider {
         korean_meaning: &str,
     ) -> Result<OutputTransferPrompt> {
         let prompt = format!(
-            "Create a brand-new Korean situational sentence that naturally requires the English chunk '{chunk}' (meaning: {korean_meaning}, original example: '{context_sentence}'). Return JSON with korean_prompt and hint."
+            "Create a brand-new Korean situational sentence that naturally requires the English chunk '{chunk}' (meaning: {korean_meaning}, original example: '{context_sentence}'). Return ONLY valid JSON with keys korean_prompt and hint."
         );
         let schema = serde_json::json!({
             "type": "OBJECT",
@@ -531,8 +596,12 @@ impl AiProvider for AgyCliProvider {
             "required": ["korean_prompt", "hint"]
         });
         let raw_stdout = self.invoke_cli(&prompt, &schema).await?;
-        let cleaned = strip_markdown_code_fence(&raw_stdout);
-        Ok(serde_json::from_str(cleaned)?)
+        let cleaned = extract_json_slice(&raw_stdout);
+        let val: OutputTransferPrompt = serde_json::Deserializer::from_str(cleaned)
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Empty JSON for OutputTransferPrompt"))??;
+        Ok(val)
     }
 
     async fn evaluate_output_transfer(
@@ -542,7 +611,7 @@ impl AiProvider for AgyCliProvider {
         user_sentence: &str,
     ) -> Result<OutputTransferEvaluation> {
         let prompt = format!(
-            "Evaluate whether the user's English sentence naturally and accurately translates the Korean prompt '{korean_prompt}' using the target chunk '{chunk}'. User sentence: '{user_sentence}'. Return JSON with passed (boolean), corrected_sentence, and feedback."
+            "Evaluate whether the user's English sentence naturally and accurately translates the Korean prompt '{korean_prompt}' using the target chunk '{chunk}'. User sentence: '{user_sentence}'. Return ONLY valid JSON with keys passed (boolean), corrected_sentence, and feedback."
         );
         let schema = serde_json::json!({
             "type": "OBJECT",
@@ -554,8 +623,12 @@ impl AiProvider for AgyCliProvider {
             "required": ["passed", "corrected_sentence", "feedback"]
         });
         let raw_stdout = self.invoke_cli(&prompt, &schema).await?;
-        let cleaned = strip_markdown_code_fence(&raw_stdout);
-        Ok(serde_json::from_str(cleaned)?)
+        let cleaned = extract_json_slice(&raw_stdout);
+        let val: OutputTransferEvaluation = serde_json::Deserializer::from_str(cleaned)
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Empty JSON for OutputTransferEvaluation"))??;
+        Ok(val)
     }
 }
 
@@ -575,10 +648,13 @@ impl DynamicAiProvider {
             .unwrap_or_else(|| "oauth".to_string());
         if configured == "agy_cli" {
             let custom_bin = get_setting(&self.pool, "agy_cli_bin").await?.filter(|s| !s.is_empty());
-            let cli = match custom_bin {
-                Some(bin) => AgyCliProvider::with_binary(bin),
-                None => AgyCliProvider::new(),
-            };
+            let selected_model = get_setting(&self.pool, "ai_model")
+                .await?
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "gemini-3.8-flash-low".to_string());
+
+            let bin = custom_bin.unwrap_or_else(|| "agy".to_string());
+            let cli = AgyCliProvider::with_binary_and_model(bin, Some(selected_model));
             Ok(Box::new(cli))
         } else {
             Ok(Box::new(CloudCodeOAuthProvider::new(self.pool.clone())))
@@ -644,6 +720,8 @@ struct ProviderPayload {
     provider: Option<String>,
     #[serde(default)]
     ai_provider: Option<String>,
+    #[serde(default)]
+    ai_model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -883,8 +961,27 @@ async fn provider_switch_handler(
             .into_response();
     }
 
+    let saved_model = if let Some(m) = payload.ai_model.as_deref() {
+        let trimmed = m.trim();
+        if !trimmed.is_empty() {
+            let _ = set_setting(&state.pool, "ai_model", trimmed).await;
+            trimmed.to_string()
+        } else {
+            "gemini-3.8-flash-low".to_string()
+        }
+    } else {
+        get_setting(&state.pool, "ai_model")
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "gemini-3.8-flash-low".to_string())
+    };
+
     if wants_json(&headers) {
-        Json(serde_json::json!({ "ai_provider": provider })).into_response()
+        Json(serde_json::json!({
+            "ai_provider": provider,
+            "ai_model": saved_model,
+        })).into_response()
     } else {
         (StatusCode::SEE_OTHER, [(header::LOCATION, "/settings")]).into_response()
     }
@@ -1117,7 +1214,12 @@ async fn settings_page_handler(State(state): State<AppState>) -> Response {
         .await
         .ok()
         .flatten()
-        .unwrap_or_else(|| "oauth".to_string());
+        .unwrap_or_else(|| "agy_cli".to_string());
+    let current_model = get_setting(&state.pool, "ai_model")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "gemini-3.8-flash-low".to_string());
     let project_id = get_setting(&state.pool, "cloud_code_project_id")
         .await
         .ok()
@@ -1141,6 +1243,7 @@ async fn settings_page_handler(State(state): State<AppState>) -> Response {
         &current_provider,
         has_token,
         &project_id,
+        &current_model,
     ))
     .into_response()
 }
@@ -1150,6 +1253,7 @@ pub fn render_settings_page(
     current_provider: &str,
     has_token: bool,
     project_id: &str,
+    current_model: &str,
 ) -> String {
     let oauth_checked = if current_provider != "agy_cli" {
         "checked"
@@ -1161,6 +1265,12 @@ pub fn render_settings_page(
     } else {
         ""
     };
+
+    let flash_low_sel = if current_model == "gemini-3.8-flash-low" { "selected" } else { "" };
+    let flash_med_sel = if current_model == "gemini-3.8-flash-medium" { "selected" } else { "" };
+    let argon_med_sel = if current_model == "gemini-4-argon-medium" { "selected" } else { "" };
+    let claude_sel = if current_model.contains("claude") { "selected" } else { "" };
+
     let status_text = if has_token {
         format!(
             "연결됨 (Cloud Code Project: {})",
@@ -1198,19 +1308,28 @@ pub fn render_settings_page(
     </header>
 
     <section class="panel">
-      <h1>AI 프로바이더 설정 (Dual AI Provider)</h1>
+      <h1>AI 엔진 및 모델 설정 (AI Engine & Model)</h1>
       <form method="POST" action="/settings/provider">
         <label>
-          <input type="radio" name="provider" value="oauth" style="width:auto;" {oauth_checked}>
-          Google OAuth PKCE (Cloud Code Assist API — Gemini Pro)
+          <input type="radio" name="provider" value="agy_cli" style="width:auto;" {cli_checked}>
+          <strong>로컬 Antigravity CLI (권장)</strong>
         </label>
         <br>
         <label>
-          <input type="radio" name="provider" value="agy_cli" style="width:auto;" {cli_checked}>
-          로컬 Antigravity CLI (<code>agy -p --output-format json</code>)
+          <input type="radio" name="provider" value="oauth" style="width:auto;" {oauth_checked}>
+          Google OAuth PKCE (Cloud Code Assist API)
         </label>
-        <div style="margin-top:0.75rem;">
-          <button type="submit" class="btn btn-primary">프로바이더 변경 저장</button>
+
+        <label for="ai_model" style="display:block;margin-top:1.25rem;font-weight:600;">Antigravity CLI 실행 모델:</label>
+        <select id="ai_model" name="ai_model" style="margin-top:0.25rem;">
+          <option value="gemini-3.8-flash-low" {flash_low_sel}>⚡ Gemini 3.8 Flash (Low) — 초고속 / 권장 (2~3초)</option>
+          <option value="gemini-3.8-flash-medium" {flash_med_sel}>⚡ Gemini 3.8 Flash (Medium) — 균형</option>
+          <option value="gemini-4-argon-medium" {argon_med_sel}>🧠 Gemini 4 Argon (Medium) — 심층 분석</option>
+          <option value="claude-sonnet-5-5-medium" {claude_sel}>🧠 Claude Sonnet 5.5 (Medium)</option>
+        </select>
+
+        <div style="margin-top:1rem;">
+          <button type="submit" class="btn btn-primary">설정 저장 (Save Settings)</button>
         </div>
       </form>
     </section>

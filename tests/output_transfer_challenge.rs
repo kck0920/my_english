@@ -31,7 +31,7 @@ impl AiProvider for FakeOutputTransferAiProvider {
 
     async fn generate_output_transfer_prompt(
         &self,
-        chunk: &str,
+        _chunk: &str,
         _context_sentence: &str,
         _korean_meaning: &str,
     ) -> Result<OutputTransferPrompt> {

@@ -179,7 +179,7 @@ async fn audio_gym_page_and_playlist_api_filters_cards() {
     let (app, cookie, pool) = test_app_with_tts(fake_tts.clone()).await;
 
     // Create 2 study cards
-    let card1 = cards::insert_study_card(
+    let _card1 = cards::insert_study_card(
         &pool,
         &CreateStudyCardInput {
             chunk: "get me every time".into(),
