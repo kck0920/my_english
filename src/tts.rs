@@ -649,20 +649,66 @@ pub async fn audio_gym_page(
             const key = getAudioCacheKey(text, lang, gender);
             const audio = getSharedAudio();
 
-            audio.onended = () => {{
+            let finished = false;
+            let watchdog = null;
+
+            const completeOnce = () => {{
+                if (finished) return;
+                finished = true;
+                if (watchdog) {{
+                    clearTimeout(watchdog);
+                    watchdog = null;
+                }}
                 if (myToken !== currentSpeechToken) return;
                 if (onEndCallback) onEndCallback();
             }};
 
-            audio.onerror = (e) => {{
+            // 모바일/브라우저 오디오 지연 및 멈춤 방지 워치독
+            const setWatchdog = (timeoutMs) => {{
+                if (watchdog) clearTimeout(watchdog);
+                watchdog = setTimeout(() => {{
+                    console.warn('Speech playback watchdog triggered for text:', text.substring(0, 30));
+                    completeOnce();
+                }}, timeoutMs);
+            }};
+
+            // 초기 기본 타임아웃: 글자당 350ms (최소 8초, 최대 25초)
+            setWatchdog(Math.min(25000, Math.max(8000, text.length * 350)));
+
+            audio.onloadedmetadata = () => {{
                 if (myToken !== currentSpeechToken) return;
+                if (!isNaN(audio.duration) && audio.duration > 0) {{
+                    // 실제 오디오 길이 + 3초 안전 버퍼
+                    setWatchdog(Math.ceil((audio.duration + 3) * 1000));
+                }}
+            }};
+
+            audio.onended = () => {{
+                completeOnce();
+            }};
+
+            audio.onerror = (e) => {{
+                if (finished || myToken !== currentSpeechToken) return;
                 console.warn('Audio stream error, falling back to Web Speech:', e);
-                playBrowserSpeech(text, lang, gender, myToken, onEndCallback);
+                if (watchdog) {{ clearTimeout(watchdog); watchdog = null; }}
+                playBrowserSpeech(text, lang, gender, myToken, completeOnce);
             }};
 
             const cachedBlobUrl = audioBlobCache.get(key);
             const directUrl = `/api/tts?text=${{encodeURIComponent(text.trim())}}&lang=${{lang}}&gender=${{gender}}`;
-            audio.src = cachedBlobUrl || directUrl;
+            const targetUrl = cachedBlobUrl || directUrl;
+
+            // 이미 동일한 src를 재생한 직후(예: STEP 3 -> STEP 4)라면 currentTime을 반드시 0으로 리셋
+            if (audio.src === targetUrl || (cachedBlobUrl && audio.src === cachedBlobUrl)) {{
+                try {{
+                    audio.currentTime = 0;
+                }} catch(e) {{}}
+            }} else {{
+                audio.src = targetUrl;
+            }}
+            try {{
+                audio.currentTime = 0;
+            }} catch(e) {{}}
 
             if (!cachedBlobUrl) {{
                 prefetchSpeechAudio(text, lang, gender);
@@ -671,17 +717,19 @@ pub async fn audio_gym_page(
             const p = audio.play();
             if (p !== undefined) {{
                 p.catch(err => {{
-                    if (myToken !== currentSpeechToken) return;
+                    if (finished || myToken !== currentSpeechToken) return;
                     console.warn('audio.play() rejected, retrying with blob prefetch:', err);
                     prefetchSpeechAudio(text, lang, gender).then(blobUrl => {{
-                        if (myToken !== currentSpeechToken) return;
+                        if (finished || myToken !== currentSpeechToken) return;
                         if (blobUrl) {{
                             audio.src = blobUrl;
+                            try {{ audio.currentTime = 0; }} catch(e) {{}}
                         }}
                         audio.play().catch(retryErr => {{
-                            if (myToken !== currentSpeechToken) return;
+                            if (finished || myToken !== currentSpeechToken) return;
                             console.warn('Retry failed, falling back to Web Speech:', retryErr);
-                            playBrowserSpeech(text, lang, gender, myToken, onEndCallback);
+                            if (watchdog) {{ clearTimeout(watchdog); watchdog = null; }}
+                            playBrowserSpeech(text, lang, gender, myToken, completeOnce);
                         }});
                     }});
                 }});
@@ -748,10 +796,10 @@ pub async fn audio_gym_page(
                 }} else {{
                     playBtn.disabled = false;
                     koreanText.innerText = '▶ 시작하기 버튼을 누르면 자동 재생됩니다.';
-                    // 첫 문장들 사전 로드
-                    if (playlist[0]) {{
-                        prefetchSpeechAudio(playlist[0].korean_meaning, 'ko', voiceGender);
-                        prefetchSpeechAudio(playlist[0].context_sentence, 'en', voiceGender);
+                    // 첫 문장들 사전 로드 (최대 5장 백그라운드 캐싱)
+                    for (let i = 0; i < Math.min(playlist.length, 5); i++) {{
+                        prefetchSpeechAudio(playlist[i].korean_meaning, 'ko', voiceGender);
+                        prefetchSpeechAudio(playlist[i].context_sentence, 'en', voiceGender);
                     }}
                 }}
             }} catch (err) {{
@@ -822,14 +870,8 @@ pub async fn audio_gym_page(
             playBtn.innerText = '⏸ 일시정지';
             acquireWakeLock();
 
-            // 제스처 시점에 단일 Audio 인스턴스 언락
-            const audio = getSharedAudio();
-            try {{
-                audio.play().then(() => {{
-                    audio.pause();
-                    audio.currentTime = 0;
-                }}).catch(() => {{}});
-            }} catch (e) {{}}
+            // 제스처 시점에 단일 Audio 인스턴스 준비
+            getSharedAudio();
 
             runCurrentStep(currentStepRunId);
         }}
@@ -880,11 +922,13 @@ pub async fn audio_gym_page(
             updateProgress();
             updateMediaSession(card, currentIndex, playlist.length);
 
-            // 다음 카드의 오디오를 미리 백그라운드에서 다운로드 (지연 시간 0ms)
-            if (currentIndex + 1 < playlist.length) {{
-                const nextCard = playlist[currentIndex + 1];
-                prefetchSpeechAudio(nextCard.korean_meaning, 'ko', voiceGender);
-                prefetchSpeechAudio(nextCard.context_sentence, 'en', voiceGender);
+            // 다음 카드들의 오디오를 미리 백그라운드에서 다운로드 (지연 시간 0ms)
+            for (let i = 1; i <= 3; i++) {{
+                if (currentIndex + i < playlist.length) {{
+                    const nextCard = playlist[currentIndex + i];
+                    prefetchSpeechAudio(nextCard.korean_meaning, 'ko', voiceGender);
+                    prefetchSpeechAudio(nextCard.context_sentence, 'en', voiceGender);
+                }}
             }}
             // 현재 카드의 영어 오디오 사전 로드
             prefetchSpeechAudio(card.context_sentence, 'en', voiceGender);
