@@ -578,7 +578,10 @@ pub fn render_review_card_page(
     </div>
     <span class="stage-badge">SRS Stage {srs_stage}</span>
   </div>
-  <p class="context-sentence" style="font-size: 1.15rem; font-weight: 600;">{context_sentence}</p>
+  <div style="display: flex; align-items: center; gap: 0.5rem;">
+    <p class="context-sentence" style="font-size: 1.15rem; font-weight: 600; margin: 0;">{context_sentence}</p>
+    <button type="button" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" onclick="new Audio('/api/tts?text={context_sentence_enc}&lang=en').play()">🔊</button>
+  </div>
   <p class="korean-meaning">{korean_meaning}</p>
   {examples_html}
   {nuance_html}
@@ -605,6 +608,7 @@ pub fn render_review_card_page(
             surface_chunk = escape_html(&cloze.target_surface),
             srs_stage = card.srs_stage,
             context_sentence = escape_html(&card.context_sentence),
+            context_sentence_enc = urlencoding::encode(&card.context_sentence),
             korean_meaning = escape_html(&card.korean_meaning),
         )
     } else {
