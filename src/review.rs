@@ -929,44 +929,71 @@ pub fn render_review_card_page(
     {body_section}
   </div>
   <script>
+    let reviewAudio = null;
+    let reviewPlayToken = 0;
+    let reviewWatchdog = null;
+    const reviewBlobCache = new Map();
+
+    function getReviewAudio() {{
+      if (!reviewAudio) {{
+        reviewAudio = new Audio();
+        reviewAudio.preload = 'auto';
+        reviewAudio.preservesPitch = true;
+        reviewAudio.playbackRate = 1.0;
+        reviewAudio.setAttribute('playsinline', '');
+        reviewAudio.setAttribute('webkit-playsinline', '');
+      }}
+      return reviewAudio;
+    }}
+
+    function prefetchReviewAudio(text) {{
+      if (!text || !text.trim() || reviewBlobCache.has(text.trim())) return;
+      fetch('/api/tts?text=' + encodeURIComponent(text.trim()) + '&lang=en&gender=female')
+        .then(res => res.ok ? res.blob() : null)
+        .then(blob => {{
+          if (blob && blob.size > 0) {{
+            reviewBlobCache.set(text.trim(), URL.createObjectURL(blob));
+          }}
+        }})
+        .catch(() => {{}});
+    }}
+
     function playReviewAudio(btn, text) {{
-      if (!text) return;
+      if (!text || !text.trim()) return;
+      const clean = text.trim();
       const orig = btn ? btn.innerText : '🔊';
-      if (btn) btn.innerText = '⏳';
+      if (btn) btn.innerText = '🔊 ...';
+
+      reviewPlayToken++;
+      const myToken = reviewPlayToken;
+      if (reviewWatchdog) {{
+        clearTimeout(reviewWatchdog);
+        reviewWatchdog = null;
+      }}
+
       let done = false;
       const finish = () => {{
         if (!done) {{
           done = true;
-          if (btn) btn.innerText = orig;
+          if (reviewWatchdog) {{
+            clearTimeout(reviewWatchdog);
+            reviewWatchdog = null;
+          }}
+          if (myToken === reviewPlayToken && btn) btn.innerText = orig;
         }}
       }};
-      try {{
-        const audio = new Audio('/api/tts?text=' + encodeURIComponent(text) + '&lang=en');
-        audio.onended = finish;
-        audio.onerror = () => {{
-          if ('speechSynthesis' in window) {{
-            try {{
-              const u = new SpeechSynthesisUtterance(text);
-              u.lang = 'en-US';
-              u.onend = finish;
-              u.onerror = finish;
-              window.speechSynthesis.speak(u);
-            }} catch (e) {{ finish(); }}
-          }} else {{
-            finish();
-          }}
-        }};
-        const p = audio.play();
-        if (p !== undefined) {{
-          p.catch(() => {{
-            audio.onerror();
-          }});
-        }}
-      }} catch (err) {{
+
+      // Safety watchdog timer: never hang
+      reviewWatchdog = setTimeout(finish, 8000);
+
+      const fallbackBrowser = () => {{
+        if (myToken !== reviewPlayToken || done) return;
         if ('speechSynthesis' in window) {{
           try {{
-            const u = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(clean);
             u.lang = 'en-US';
+            u.rate = 0.95;
             u.onend = finish;
             u.onerror = finish;
             window.speechSynthesis.speak(u);
@@ -974,9 +1001,40 @@ pub fn render_review_card_page(
         }} else {{
           finish();
         }}
+      }};
+
+      try {{
+        const audio = getReviewAudio();
+        audio.onended = finish;
+        audio.onerror = () => {{
+          fallbackBrowser();
+        }};
+
+        const cachedUrl = reviewBlobCache.get(clean);
+        audio.src = cachedUrl || ('/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=female');
+        if (!cachedUrl) {{
+          prefetchReviewAudio(clean);
+        }}
+
+        const p = audio.play();
+        if (p !== undefined) {{
+          p.catch(err => {{
+            console.warn('Audio play rejected, falling back to Web Speech:', err);
+            fallbackBrowser();
+          }});
+        }}
+      }} catch (err) {{
+        fallbackBrowser();
       }}
-      setTimeout(finish, 6000);
     }}
+
+    // 현재 문장 오디오 사전 로드 (0ms 즉시 재생)
+    document.addEventListener('DOMContentLoaded', () => {{
+      const el = document.querySelector('.context-sentence');
+      if (el && el.innerText) {{
+        prefetchReviewAudio(el.innerText);
+      }}
+    }});
   </script>
 </body>
 </html>"#

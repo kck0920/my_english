@@ -384,16 +384,22 @@ pub async fn audio_gym_page(
         {css}
         .gym-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }}
         .gym-stage {{ background: var(--bg-card); border-radius: 1rem; padding: 2rem 1.5rem; text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 1.5rem; border: 1px solid var(--border); }}
-        .gym-step-indicator {{ font-size: 0.875rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }}
+        .gym-step-indicator {{ font-size: 0.875rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }}
         .gym-korean {{ font-size: 1.25rem; font-weight: 600; color: var(--text-dark); margin-bottom: 1rem; min-height: 2rem; }}
         .gym-chunk {{ font-size: 1.5rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem; min-height: 2.25rem; }}
         .gym-sentence {{ font-size: 1.125rem; color: var(--text-muted); line-height: 1.6; min-height: 3rem; }}
-        .gym-timer {{ font-size: 3rem; font-weight: 800; color: var(--accent); margin: 1rem 0; font-variant-numeric: tabular-nums; }}
+        .gym-timer {{ font-size: 3.5rem; font-weight: 800; color: var(--accent); margin: 1rem 0; font-variant-numeric: tabular-nums; }}
         .gym-controls {{ display: flex; gap: 0.75rem; justify-content: center; align-items: center; margin-bottom: 1.5rem; }}
         .gym-btn {{ padding: 0.75rem 1.5rem; border-radius: 0.75rem; font-size: 1rem; font-weight: 700; cursor: pointer; border: none; }}
         .gym-btn-primary {{ background: var(--primary); color: white; }}
         .gym-btn-secondary {{ background: var(--bg-hover); color: var(--text-dark); }}
         .gym-config {{ display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.5rem; font-size: 0.875rem; }}
+        .sound-wave {{ display: inline-flex; align-items: center; gap: 2px; height: 14px; vertical-align: middle; }}
+        .sound-wave span {{ display: block; width: 3px; height: 100%; background: currentColor; border-radius: 2px; animation: gym-wave 0.9s infinite ease-in-out; }}
+        .sound-wave span:nth-child(1) {{ animation-delay: -0.4s; }}
+        .sound-wave span:nth-child(2) {{ animation-delay: -0.2s; }}
+        .sound-wave span:nth-child(3) {{ animation-delay: 0s; }}
+        @keyframes gym-wave {{ 0%, 40%, 100% {{ transform: scaleY(0.25); }} 20% {{ transform: scaleY(1); }} }}
     </style>
 </head>
 <body>
@@ -455,15 +461,18 @@ pub async fn audio_gym_page(
         let playlist = [];
         let currentIndex = 0;
         let isPlaying = false;
-        let currentRunId = 0;
+        let currentPlayToken = 0;
         let gapSeconds = {gap};
         let voiceGender = '{gender}';
         let currentStep = 'idle';
         let stepTimer = null;
         let wakeLock = null;
-        let currentUtterance = null;
+        let speechWatchdogTimer = null;
+        let sharedAudio = null;
 
-        const audio = document.getElementById('ttsAudio');
+        const audioBlobCache = new Map();
+        const audioPrefetchInFlight = new Map();
+
         const playBtn = document.getElementById('playBtn');
         const stepIndicator = document.getElementById('stepIndicator');
         const koreanText = document.getElementById('koreanText');
@@ -471,6 +480,250 @@ pub async fn audio_gym_page(
         const chunkText = document.getElementById('chunkText');
         const sentenceText = document.getElementById('sentenceText');
         const progressText = document.getElementById('progressText');
+
+        // 단일 Audio 인스턴스 반환 (iOS Safari / Android 무중단 연속 재생 보장)
+        function getSharedAudio() {{
+            if (!sharedAudio) {{
+                sharedAudio = new Audio();
+                sharedAudio.preload = 'auto';
+                sharedAudio.preservesPitch = true;
+                sharedAudio.playbackRate = 1.0;
+                sharedAudio.setAttribute('playsinline', '');
+                sharedAudio.setAttribute('webkit-playsinline', '');
+            }}
+            return sharedAudio;
+        }}
+
+        function getAudioCacheKey(text, lang, gender) {{
+            return `${{lang}}:${{gender}}:${{text.trim()}}`;
+        }}
+
+        // 인메모리 Blob URL 사전 캐싱 (0ms 즉시 재생)
+        function prefetchSpeechAudio(text, lang, gender) {{
+            if (!text || !text.trim()) return Promise.resolve(null);
+            const key = getAudioCacheKey(text, lang, gender);
+            if (audioBlobCache.has(key)) {{
+                return Promise.resolve(audioBlobCache.get(key));
+            }}
+            if (audioPrefetchInFlight.has(key)) {{
+                return audioPrefetchInFlight.get(key);
+            }}
+
+            const url = `/api/tts?text=${{encodeURIComponent(text.trim())}}&lang=${{lang}}&gender=${{gender}}`;
+            const promise = fetch(url)
+                .then(res => {{
+                    if (!res.ok) throw new Error(`HTTP ${{res.status}}`);
+                    return res.blob();
+                }})
+                .then(blob => {{
+                    if (!blob || blob.size === 0) throw new Error('Empty audio');
+                    const blobUrl = URL.createObjectURL(blob);
+                    audioBlobCache.set(key, blobUrl);
+                    audioPrefetchInFlight.delete(key);
+                    return blobUrl;
+                }})
+                .catch(() => {{
+                    audioPrefetchInFlight.delete(key);
+                    return null;
+                }});
+
+            audioPrefetchInFlight.set(key, promise);
+            return promise;
+        }}
+
+        // 브라우저 보이스 목록 사전 로드
+        if ('speechSynthesis' in window) {{
+            window.speechSynthesis.onvoiceschanged = () => {{
+                try {{ window.speechSynthesis.getVoices(); }} catch(e) {{}}
+            }};
+            try {{ window.speechSynthesis.getVoices(); }} catch(e) {{}}
+        }}
+
+        // 최적 원어민 보이스 매칭 (iOS Ava/Samantha, Windows Jenny/Aria, Android Google US)
+        function getBestVoice(lang, gender) {{
+            if (!('speechSynthesis' in window)) return null;
+            const voices = window.speechSynthesis.getVoices();
+            if (!voices || voices.length === 0) return null;
+
+            if (lang === 'ko') {{
+                return voices.find(v => v.lang.startsWith('ko')) || null;
+            }}
+
+            const roboticVoices = ['bad news', 'bells', 'boing', 'cellos', 'deranged', 'good news', 'hysterical', 'junior', 'kathy', 'organ', 'princess', 'ralph', 'trinoids', 'whisper', 'zarvox'];
+
+            if (gender === 'male') {{
+                const maleKeywords = ['evan', 'nathan', 'christopher', 'guy', 'daniel', 'alex', 'fred', 'david', 'mark', 'tom', 'aaron', 'george', 'eddy', 'reed', 'rocko', 'male'];
+                for (const kw of maleKeywords) {{
+                    const found = voices.find(v => v.lang === 'en-US' && v.name.toLowerCase().includes(kw));
+                    if (found) return found;
+                }}
+                for (const kw of maleKeywords) {{
+                    const found = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(kw));
+                    if (found) return found;
+                }}
+                const femaleKeywords = ['ava', 'samantha', 'jenny', 'aria', 'allison', 'zoe', 'susan', 'karen', 'victoria', 'female'];
+                const nonFemale = voices.find(v =>
+                    v.lang === 'en-US' &&
+                    !femaleKeywords.some(f => v.name.toLowerCase().includes(f)) &&
+                    !roboticVoices.some(bad => v.name.toLowerCase().includes(bad))
+                );
+                if (nonFemale) return nonFemale;
+            }} else {{
+                const femaleKeywords = ['ava', 'samantha', 'jenny', 'aria', 'allison', 'zoe', 'susan', 'victoria', 'karen', 'female', 'google us english'];
+                for (const kw of femaleKeywords) {{
+                    const found = voices.find(v => v.lang === 'en-US' && v.name.toLowerCase().includes(kw));
+                    if (found) return found;
+                }}
+                for (const kw of femaleKeywords) {{
+                    const found = voices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(kw));
+                    if (found) return found;
+                }}
+                const naturalEnUs = voices.find(v =>
+                    v.lang === 'en-US' && !roboticVoices.some(bad => v.name.toLowerCase().includes(bad))
+                );
+                if (naturalEnUs) return naturalEnUs;
+            }}
+            return voices.find(v => v.lang.startsWith('en')) || null;
+        }}
+
+        // 브라우저 TTS 폴백 (비동기 멈춤 방지 워치독 타이머 포함)
+        function playBrowserSpeech(text, lang, gender, token, onFinish) {{
+            let finished = false;
+            const completeOnce = () => {{
+                if (finished) return;
+                finished = true;
+                if (speechWatchdogTimer) {{
+                    clearTimeout(speechWatchdogTimer);
+                    speechWatchdogTimer = null;
+                }}
+                window.currentUtterance = null;
+                if (token !== undefined && token !== currentPlayToken) return;
+                if (onFinish) onFinish();
+            }};
+
+            if (!('speechSynthesis' in window)) {{
+                completeOnce();
+                return;
+            }}
+
+            try {{
+                if (window.speechSynthesis.paused) {{
+                    window.speechSynthesis.resume();
+                }}
+            }} catch(e) {{}}
+
+            const u = new SpeechSynthesisUtterance(text);
+            u.lang = (lang === 'ko') ? 'ko-KR' : 'en-US';
+            u.rate = (lang === 'ko') ? 1.0 : 0.95;
+            u.pitch = 1.0;
+            const voice = getBestVoice(lang, gender);
+            if (voice) u.voice = voice;
+
+            u.onend = () => completeOnce();
+            u.onerror = () => completeOnce();
+
+            window.currentUtterance = u; // prevent GC
+
+            const maxWaitMs = Math.min(12000, Math.max(3000, text.length * 110));
+            speechWatchdogTimer = setTimeout(() => {{
+                completeOnce();
+            }}, maxWaitMs);
+
+            try {{
+                window.speechSynthesis.speak(u);
+            }} catch(e) {{
+                completeOnce();
+            }}
+        }}
+
+        // 메인 음성 재생 함수 (1순위 Amazon Polly/Google TTS 캐시 -> 실패 시 브라우저 음성 폴백)
+        function playSpeech(text, lang, onEndCallback) {{
+            if (!text || !text.trim()) {{
+                if (onEndCallback) onEndCallback();
+                return;
+            }}
+
+            const myToken = ++currentPlayToken;
+            const gender = voiceGender;
+            const key = getAudioCacheKey(text, lang, gender);
+            const audio = getSharedAudio();
+
+            audio.onended = () => {{
+                if (myToken !== currentPlayToken) return;
+                if (onEndCallback) onEndCallback();
+            }};
+
+            audio.onerror = (e) => {{
+                if (myToken !== currentPlayToken) return;
+                console.warn('Audio stream error, falling back to Web Speech:', e);
+                playBrowserSpeech(text, lang, gender, myToken, onEndCallback);
+            }};
+
+            const cachedBlobUrl = audioBlobCache.get(key);
+            const directUrl = `/api/tts?text=${{encodeURIComponent(text.trim())}}&lang=${{lang}}&gender=${{gender}}`;
+            audio.src = cachedBlobUrl || directUrl;
+
+            if (!cachedBlobUrl) {{
+                prefetchSpeechAudio(text, lang, gender);
+            }}
+
+            const p = audio.play();
+            if (p !== undefined) {{
+                p.catch(err => {{
+                    if (myToken !== currentPlayToken) return;
+                    console.warn('audio.play() rejected, retrying with blob prefetch:', err);
+                    prefetchSpeechAudio(text, lang, gender).then(blobUrl => {{
+                        if (myToken !== currentPlayToken) return;
+                        if (blobUrl) {{
+                            audio.src = blobUrl;
+                        }}
+                        audio.play().catch(retryErr => {{
+                            if (myToken !== currentPlayToken) return;
+                            console.warn('Retry failed, falling back to Web Speech:', retryErr);
+                            playBrowserSpeech(text, lang, gender, myToken, onEndCallback);
+                        }});
+                    }});
+                }});
+            }}
+        }}
+
+        function stopCurrentSpeech() {{
+            currentPlayToken++;
+            if (speechWatchdogTimer) {{
+                clearTimeout(speechWatchdogTimer);
+                speechWatchdogTimer = null;
+            }}
+            if (sharedAudio) {{
+                sharedAudio.onended = null;
+                sharedAudio.onerror = null;
+                try {{
+                    sharedAudio.pause();
+                    sharedAudio.currentTime = 0;
+                }} catch(e) {{}}
+            }}
+            if ('speechSynthesis' in window && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {{
+                try {{
+                    window.speechSynthesis.cancel();
+                }} catch(e) {{}}
+            }}
+        }}
+
+        // 잠금화면 및 백그라운드 미디어 세션 연동
+        function updateMediaSession(card, idx, total) {{
+            if (!('mediaSession' in navigator) || !card) return;
+            try {{
+                navigator.mediaSession.metadata = new MediaMetadata({{
+                    title: card.context_sentence || 'Audio Gym',
+                    artist: card.korean_meaning || '말하기 훈련',
+                    album: `Audio Gym (${{idx + 1}}/${{total}})`
+                }});
+                navigator.mediaSession.setActionHandler('play', () => {{ if (!isPlaying) togglePlay(); }});
+                navigator.mediaSession.setActionHandler('pause', () => {{ if (isPlaying) togglePlay(); }});
+                navigator.mediaSession.setActionHandler('previoustrack', () => {{ prevCard(); }});
+                navigator.mediaSession.setActionHandler('nexttrack', () => {{ nextCard(); }});
+                navigator.mediaSession.setActionHandler('stop', () => {{ pause(); }});
+            }} catch(e) {{}}
+        }}
 
         async function init() {{
             const filter = document.getElementById('filterSelect').value;
@@ -494,6 +747,11 @@ pub async fn audio_gym_page(
                 }} else {{
                     playBtn.disabled = false;
                     koreanText.innerText = '▶ 시작하기 버튼을 누르면 자동 재생됩니다.';
+                    // 첫 문장들 사전 로드
+                    if (playlist[0]) {{
+                        prefetchSpeechAudio(playlist[0].korean_meaning, 'ko', voiceGender);
+                        prefetchSpeechAudio(playlist[0].context_sentence, 'en', voiceGender);
+                    }}
                 }}
             }} catch (err) {{
                 console.error(err);
@@ -546,19 +804,8 @@ pub async fn audio_gym_page(
 
         function pause() {{
             isPlaying = false;
-            currentRunId++;
-            playBtn.innerText = '▶ 재생';
-            if (audio) {{
-                try {{
-                    audio.pause();
-                    audio.currentTime = 0;
-                }} catch (e) {{}}
-            }}
-            if ('speechSynthesis' in window) {{
-                try {{
-                    window.speechSynthesis.cancel();
-                }} catch (e) {{}}
-            }}
+            stopCurrentSpeech();
+            playBtn.innerText = '▶ 시작하기';
             if (stepTimer) {{
                 clearInterval(stepTimer);
                 stepTimer = null;
@@ -569,12 +816,11 @@ pub async fn audio_gym_page(
         async function play() {{
             if (playlist.length === 0) return;
             isPlaying = true;
-            currentRunId++;
-            const runId = currentRunId;
             playBtn.innerText = '⏸ 일시정지';
             acquireWakeLock();
 
-            // Unlock HTML5 Audio during user click gesture
+            // 제스처 시점에 단일 Audio 인스턴스 언락
+            const audio = getSharedAudio();
             try {{
                 audio.play().then(() => {{
                     audio.pause();
@@ -582,23 +828,16 @@ pub async fn audio_gym_page(
                 }}).catch(() => {{}});
             }} catch (e) {{}}
 
-            if ('speechSynthesis' in window) {{
-                try {{
-                    window.speechSynthesis.resume();
-                }} catch (e) {{}}
-            }}
-
-            runCurrentStep(runId);
+            runCurrentStep(currentPlayToken);
         }}
 
         function prevCard() {{
             if (currentIndex > 0) {{
                 currentIndex--;
                 if (isPlaying) {{
-                    currentRunId++;
+                    stopCurrentSpeech();
                     if (stepTimer) {{ clearInterval(stepTimer); stepTimer = null; }}
-                    if (audio) {{ try {{ audio.pause(); }} catch (e) {{}} }}
-                    runCurrentStep(currentRunId);
+                    runCurrentStep(currentPlayToken);
                 }} else {{
                     updateProgress();
                     const card = playlist[currentIndex];
@@ -613,10 +852,9 @@ pub async fn audio_gym_page(
             if (currentIndex < playlist.length - 1) {{
                 currentIndex++;
                 if (isPlaying) {{
-                    currentRunId++;
+                    stopCurrentSpeech();
                     if (stepTimer) {{ clearInterval(stepTimer); stepTimer = null; }}
-                    if (audio) {{ try {{ audio.pause(); }} catch (e) {{}} }}
-                    runCurrentStep(currentRunId);
+                    runCurrentStep(currentPlayToken);
                 }} else {{
                     updateProgress();
                     const card = playlist[currentIndex];
@@ -631,119 +869,44 @@ pub async fn audio_gym_page(
             }}
         }}
 
-        function playTts(text, lang, runId) {{
-            return new Promise(async (resolve) => {{
-                if (!isPlaying || runId !== currentRunId) return resolve();
-
-                let finished = false;
-                let timeoutId = null;
-
-                const done = () => {{
-                    if (!finished) {{
-                        finished = true;
-                        if (timeoutId) clearTimeout(timeoutId);
-                        audio.onended = null;
-                        audio.onerror = null;
-                        resolve();
-                    }}
-                }};
-
-                // Safety timeout: Maximum 8 seconds per audio chunk
-                timeoutId = setTimeout(() => {{
-                    console.warn('TTS safety timeout triggered, proceeding to next step');
-                    try {{ audio.pause(); }} catch (e) {{}}
-                    done();
-                }}, 8000);
-
-                const fallbackWebSpeech = () => {{
-                    if (!isPlaying || runId !== currentRunId || finished) return done();
-                    if ('speechSynthesis' in window) {{
-                        try {{
-                            const u = new SpeechSynthesisUtterance(text);
-                            u.lang = (lang === 'ko') ? 'ko-KR' : 'en-US';
-                            u.rate = (lang === 'ko') ? 1.0 : 0.95;
-                            currentUtterance = u;
-                            u.onend = () => {{
-                                currentUtterance = null;
-                                done();
-                            }};
-                            u.onerror = (e) => {{
-                                console.warn('SpeechSynthesis error:', e);
-                                currentUtterance = null;
-                                done();
-                            }};
-                            window.speechSynthesis.speak(u);
-                        }} catch (e) {{
-                            done();
-                        }}
-                    }} else {{
-                        done();
-                    }}
-                }};
-
-                try {{
-                    const url = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
-                    const res = await fetch(url);
-                    if (!res.ok) {{
-                        throw new Error(`TTS HTTP error: ${{res.status}}`);
-                    }}
-
-                    const blob = await res.blob();
-                    if (!isPlaying || runId !== currentRunId || finished) return done();
-
-                    const blobUrl = URL.createObjectURL(blob);
-                    audio.src = blobUrl;
-
-                    audio.onended = () => {{
-                        URL.revokeObjectURL(blobUrl);
-                        done();
-                    }};
-
-                    audio.onerror = (err) => {{
-                        console.warn('Audio playback error:', err);
-                        URL.revokeObjectURL(blobUrl);
-                        fallbackWebSpeech();
-                    }};
-
-                    const p = audio.play();
-                    if (p !== undefined) {{
-                        p.catch((err) => {{
-                            console.warn('audio.play() rejected:', err);
-                            URL.revokeObjectURL(blobUrl);
-                            fallbackWebSpeech();
-                        }});
-                    }}
-                }} catch (err) {{
-                    console.warn('TTS fetch failed, falling back to Web Speech API:', err);
-                    fallbackWebSpeech();
-                }}
-            }});
-        }}
-
         async function runCurrentStep(runId) {{
-            if (!isPlaying || runId !== currentRunId || currentIndex >= playlist.length) return;
+            if (!isPlaying || runId !== currentPlayToken || currentIndex >= playlist.length) return;
             const card = playlist[currentIndex];
             updateProgress();
+            updateMediaSession(card, currentIndex, playlist.length);
 
+            // 다음 카드의 오디오를 미리 백그라운드에서 다운로드 (지연 시간 0ms)
+            if (currentIndex + 1 < playlist.length) {{
+                const nextCard = playlist[currentIndex + 1];
+                prefetchSpeechAudio(nextCard.korean_meaning, 'ko', voiceGender);
+                prefetchSpeechAudio(nextCard.context_sentence, 'en', voiceGender);
+            }}
+            // 현재 카드의 영어 오디오 사전 로드
+            prefetchSpeechAudio(card.context_sentence, 'en', voiceGender);
+
+            // STEP 1: 한국어 의미 듣기
             currentStep = 'ko';
-            stepIndicator.innerText = 'STEP 1: 한국어 의미 듣기 🔊';
+            stepIndicator.innerHTML = '<span class="sound-wave"><span></span><span></span><span></span></span> STEP 1: 한국어 의미 듣기';
             koreanText.innerText = card.korean_meaning;
             timerDisplay.style.display = 'none';
             chunkText.style.display = 'none';
             sentenceText.style.display = 'none';
 
-            await playTts(card.korean_meaning, 'ko', runId);
-            if (!isPlaying || runId !== currentRunId) return;
+            await new Promise(resolve => {{
+                playSpeech(card.korean_meaning, 'ko', resolve);
+            }});
+            if (!isPlaying || runId !== currentPlayToken) return;
 
+            // STEP 2: 직접 영어로 말해보세요! (Think & Speak)
             currentStep = 'gap';
-            stepIndicator.innerText = 'STEP 2: 직접 영어로 말해보세요! (Think & Speak) ⏱️';
+            stepIndicator.innerText = '⏱️ STEP 2: 직접 영어로 말해보세요! (Think & Speak)';
             timerDisplay.style.display = 'block';
             let remain = gapSeconds;
             timerDisplay.innerText = remain;
 
             await new Promise(resolve => {{
                 stepTimer = setInterval(() => {{
-                    if (!isPlaying || runId !== currentRunId) {{
+                    if (!isPlaying || runId !== currentPlayToken) {{
                         clearInterval(stepTimer);
                         stepTimer = null;
                         return resolve();
@@ -759,32 +922,38 @@ pub async fn audio_gym_page(
                     }}
                 }}, 1000);
             }});
-            if (!isPlaying || runId !== currentRunId) return;
+            if (!isPlaying || runId !== currentPlayToken) return;
 
+            // STEP 3: 원어민 영어 확인 (1/2)
             currentStep = 'en1';
-            stepIndicator.innerText = 'STEP 3: 원어민 영어 확인 (1/2) 🔊';
+            stepIndicator.innerHTML = '<span class="sound-wave"><span></span><span></span><span></span></span> STEP 3: 원어민 영어 확인 (1/2)';
             chunkText.style.display = 'block';
             chunkText.innerText = card.chunk;
             sentenceText.style.display = 'block';
             sentenceText.innerText = card.context_sentence;
 
-            await playTts(card.context_sentence, 'en', runId);
-            if (!isPlaying || runId !== currentRunId) return;
+            await new Promise(resolve => {{
+                playSpeech(card.context_sentence, 'en', resolve);
+            }});
+            if (!isPlaying || runId !== currentPlayToken) return;
 
             await new Promise(r => setTimeout(r, 600));
-            if (!isPlaying || runId !== currentRunId) return;
+            if (!isPlaying || runId !== currentPlayToken) return;
 
+            // STEP 4: 입으로 따라 말하기 (Shadowing 2/2)
             currentStep = 'en2';
-            stepIndicator.innerText = 'STEP 4: 입으로 따라 말하기 (Shadowing 2/2) 🔊';
-            await playTts(card.context_sentence, 'en', runId);
-            if (!isPlaying || runId !== currentRunId) return;
+            stepIndicator.innerHTML = '<span class="sound-wave"><span></span><span></span><span></span></span> STEP 4: 입으로 따라 말하기 (Shadowing 2/2)';
+            await new Promise(resolve => {{
+                playSpeech(card.context_sentence, 'en', resolve);
+            }});
+            if (!isPlaying || runId !== currentPlayToken) return;
 
             await new Promise(r => setTimeout(r, 1200));
-            if (!isPlaying || runId !== currentRunId) return;
+            if (!isPlaying || runId !== currentPlayToken) return;
 
             if (currentIndex < playlist.length - 1) {{
                 currentIndex++;
-                runCurrentStep(runId);
+                runCurrentStep(currentPlayToken);
             }} else {{
                 pause();
                 stepIndicator.innerText = '완료 🎉';
