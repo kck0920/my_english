@@ -544,11 +544,20 @@ pub async fn audio_gym_page(
         }}
 
         function playTts(text, lang) {{
-            return new Promise((resolve, reject) => {{
+            return new Promise((resolve) => {{
+                audio.pause();
+                audio.currentTime = 0;
                 audio.src = `/api/tts?text=${{encodeURIComponent(text)}}&lang=${{lang}}&gender=${{voiceGender}}`;
+                audio.load();
                 audio.onended = () => resolve();
-                audio.onerror = (e) => resolve();
-                audio.play().catch(() => resolve());
+                audio.onerror = (e) => {{
+                    console.error('Audio playback error', e);
+                    resolve();
+                }};
+                audio.play().catch(err => {{
+                    console.warn('Audio play() error:', err);
+                    resolve();
+                }});
             }});
         }}
 

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 
 use crate::ai::{AiProvider, DynamicAiProvider};
-use crate::tts::{NoopTtsProvider, TtsProvider};
+use crate::tts::{HttpTtsProvider, TtsProvider};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -19,13 +19,14 @@ pub struct AppState {
 impl AppState {
     pub fn new(pool: SqlitePool, app_passcode: impl Into<String>, cookie_secret: impl Into<String>) -> Self {
         let ai_provider = Arc::new(DynamicAiProvider::new(pool.clone()));
+        let tts_provider = Arc::new(HttpTtsProvider::new());
         Self {
             pool,
             db_path: None,
             app_passcode: app_passcode.into(),
             cookie_secret: cookie_secret.into(),
             ai_provider,
-            tts_provider: Arc::new(NoopTtsProvider),
+            tts_provider,
         }
     }
 
