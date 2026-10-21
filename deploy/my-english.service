@@ -1,0 +1,17 @@
+[Unit]
+Description=My English — Chunk-based AI English Study & SRS Web App
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/my_english
+ExecStart=/home/ubuntu/my_english/target/release/my_english
+Restart=always
+RestartSec=5
+Environment=PORT=3000
+Environment=DATABASE_URL=sqlite:///home/ubuntu/my_english/my_english.db
+EnvironmentFile=-/home/ubuntu/my_english/.env
+
+[Install]
+WantedBy=multi-user.target
