@@ -623,5 +623,62 @@ async fn smart_input_generates_draft_cards_renders_inline_edit_and_saves_with_sm
     assert_eq!(cards[0].source_type, "smart_input");
 }
 
+#[tokio::test]
+async fn gemini_api_key_configuration_and_mock_generation() {
+    let (app, pool, cookie) = test_app_with_pool().await;
+
+    // 1. Submit Gemini API Key via /settings/gemini_key
+    let form = "gemini_api_key=AIzaSyFakeKey123456&gemini_model=gemini-2.5-flash";
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/settings/gemini_key")
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(form))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::SEE_OTHER);
+
+    // Verify persisted in DB
+    let saved_key = my_english::ai::get_setting(&pool, "gemini_api_key")
+        .await
+        .unwrap()
+        .expect("gemini_api_key saved");
+    assert_eq!(saved_key, "AIzaSyFakeKey123456");
+
+    let saved_provider = my_english::ai::get_setting(&pool, "ai_provider")
+        .await
+        .unwrap()
+        .expect("ai_provider saved");
+    assert_eq!(saved_provider, "gemini_api");
+
+    let saved_model = my_english::ai::get_setting(&pool, "gemini_model")
+        .await
+        .unwrap()
+        .expect("gemini_model saved");
+    assert_eq!(saved_model, "gemini-2.5-flash");
+
+    // 2. Check that /settings page masks the key
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/settings")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = String::from_utf8_lossy(&res.into_body().collect().await.unwrap().to_bytes()).to_string();
+    assert!(html.contains("AIzaSy...3456"));
+    assert!(html.contains("Gemini API"));
+}
+
 
 

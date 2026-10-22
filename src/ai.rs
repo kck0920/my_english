@@ -435,18 +435,143 @@ impl CloudCodeOAuthProvider {
             }
         });
 
-        let val: serde_json::Value = self
+        let resp = self
             .client
             .post(&url)
             .bearer_auth(&access_token)
             .json(&payload)
             .send()
-            .await?
-            .error_for_status()?
-            .json()
             .await?;
 
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let err_text = resp.text().await.unwrap_or_default();
+            if status == reqwest::StatusCode::FORBIDDEN {
+                anyhow::bail!(
+                    "Google Cloud Code Assist 권한 에러 (403 Forbidden): 개인 계정은 Cloud Code Assist 무료 라이선스가 종료되었습니다. 상단 [설정] 메뉴에서 무료 'Gemini API 키(Google AI Studio)'를 등록하여 이용해 주세요. (상세: {err_text})"
+                );
+            }
+            anyhow::bail!("Cloud Code API 에러 ({status}): {err_text}");
+        }
+
+        let val: serde_json::Value = resp.json().await?;
         extract_text_from_cloud_code_response(&val)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct GeminiApiKeyProvider {
+    api_key: String,
+    model: String,
+    client: reqwest::Client,
+}
+
+impl GeminiApiKeyProvider {
+    pub fn new(api_key: impl Into<String>, model: Option<String>) -> Self {
+        let model = model
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+        Self {
+            api_key: api_key.into(),
+            model,
+            client: reqwest::Client::new(),
+        }
+    }
+
+    pub async fn call_generate_content(
+        &self,
+        prompt: &str,
+        schema: serde_json::Value,
+    ) -> Result<String> {
+        let url = format!(
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
+            self.model, self.api_key
+        );
+
+        let payload = serde_json::json!({
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{ "text": prompt }]
+                }
+            ],
+            "generationConfig": {
+                "responseMimeType": "application/json",
+                "responseSchema": schema
+            }
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let err_text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Gemini API 에러 ({status}): {err_text}");
+        }
+
+        let val: serde_json::Value = resp.json().await?;
+        extract_text_from_cloud_code_response(&val)
+    }
+}
+
+#[async_trait]
+impl AiProvider for GeminiApiKeyProvider {
+    async fn generate_draft_cards(&self, input: &str) -> Result<Vec<DraftCard>> {
+        let prompt = build_smart_input_prompt(input);
+        let text = self
+            .call_generate_content(&prompt, draft_cards_json_schema())
+            .await?;
+        parse_draft_cards_from_json_str(&text)
+    }
+
+    async fn generate_output_transfer_prompt(
+        &self,
+        chunk: &str,
+        context_sentence: &str,
+        korean_meaning: &str,
+    ) -> Result<OutputTransferPrompt> {
+        let prompt = format!(
+            "Create a brand-new Korean situational sentence that naturally requires the English chunk '{chunk}' (meaning: {korean_meaning}, original example: '{context_sentence}'). Return JSON with korean_prompt and hint."
+        );
+        let schema = serde_json::json!({
+            "type": "OBJECT",
+            "properties": {
+                "korean_prompt": { "type": "STRING" },
+                "hint": { "type": "STRING" }
+            },
+            "required": ["korean_prompt", "hint"]
+        });
+        let text = self.call_generate_content(&prompt, schema).await?;
+        let cleaned = strip_markdown_code_fence(&text);
+        Ok(serde_json::from_str(cleaned)?)
+    }
+
+    async fn evaluate_output_transfer(
+        &self,
+        chunk: &str,
+        korean_prompt: &str,
+        user_sentence: &str,
+    ) -> Result<OutputTransferEvaluation> {
+        let prompt = format!(
+            "Evaluate whether the user's English sentence naturally and accurately translates the Korean prompt '{korean_prompt}' using the target chunk '{chunk}'. User sentence: '{user_sentence}'. Return JSON with passed (boolean), corrected_sentence, and feedback."
+        );
+        let schema = serde_json::json!({
+            "type": "OBJECT",
+            "properties": {
+                "passed": { "type": "BOOLEAN" },
+                "corrected_sentence": { "type": "STRING" },
+                "feedback": { "type": "STRING" }
+            },
+            "required": ["passed", "corrected_sentence", "feedback"]
+        });
+        let text = self.call_generate_content(&prompt, schema).await?;
+        let cleaned = strip_markdown_code_fence(&text);
+        Ok(serde_json::from_str(cleaned)?)
     }
 }
 
@@ -645,7 +770,13 @@ impl DynamicAiProvider {
     async fn select_provider(&self) -> Result<Box<dyn AiProvider>> {
         let configured = get_setting(&self.pool, "ai_provider")
             .await?
-            .unwrap_or_else(|| "oauth".to_string());
+            .unwrap_or_else(|| "gemini_api".to_string());
+
+        let api_key = get_setting(&self.pool, "gemini_api_key")
+            .await?
+            .or_else(|| std::env::var("GEMINI_API_KEY").ok())
+            .unwrap_or_default();
+
         if configured == "agy_cli" {
             let custom_bin = get_setting(&self.pool, "agy_cli_bin").await?.filter(|s| !s.is_empty());
             let selected_model = get_setting(&self.pool, "ai_model")
@@ -656,6 +787,20 @@ impl DynamicAiProvider {
             let bin = custom_bin.unwrap_or_else(|| "agy".to_string());
             let cli = AgyCliProvider::with_binary_and_model(bin, Some(selected_model));
             Ok(Box::new(cli))
+        } else if configured == "gemini_api" || (!api_key.trim().is_empty() && configured != "oauth") {
+            if api_key.trim().is_empty() {
+                anyhow::bail!(
+                    "Gemini API 키가 등록되지 않았습니다. 상단 [설정] 메뉴에서 무료 'Google AI Studio Gemini API 키'를 등록해 주세요."
+                );
+            }
+            let gemini_model = get_setting(&self.pool, "gemini_model").await?;
+            let selected_model = match gemini_model {
+                Some(m) if !m.trim().is_empty() => m,
+                _ => get_setting(&self.pool, "ai_model")
+                    .await?
+                    .unwrap_or_else(|| "gemini-2.5-flash".to_string()),
+            };
+            Ok(Box::new(GeminiApiKeyProvider::new(api_key.trim(), Some(selected_model))))
         } else {
             Ok(Box::new(CloudCodeOAuthProvider::new(self.pool.clone())))
         }
@@ -696,6 +841,7 @@ impl AiProvider for DynamicAiProvider {
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/settings", get(settings_page_handler))
+        .route("/settings/gemini_key", post(gemini_key_handler))
         .route("/settings/oauth/code", post(oauth_code_exchange_handler))
         .route("/settings/provider", post(provider_switch_handler))
         .route("/settings/passcode", post(passcode_change_handler))
@@ -949,9 +1095,10 @@ async fn provider_switch_handler(
         .or(payload.ai_provider)
         .unwrap_or_default();
     let provider = match provider_raw.trim() {
+        "gemini_api" | "gemini" | "api_key" => "gemini_api",
         "oauth" => "oauth",
         "agy_cli" | "agy" | "cli" => "agy_cli",
-        _ => return (StatusCode::BAD_REQUEST, "provider must be oauth or agy_cli").into_response(),
+        _ => return (StatusCode::BAD_REQUEST, "provider must be gemini_api, oauth, or agy_cli").into_response(),
     };
 
     if let Err(err) = set_setting(&state.pool, "ai_provider", provider).await {
@@ -984,8 +1131,35 @@ async fn provider_switch_handler(
             "ai_model": saved_model,
         })).into_response()
     } else {
-        (StatusCode::SEE_OTHER, [(header::LOCATION, "/settings")]).into_response()
+        (StatusCode::SEE_OTHER, [(header::LOCATION, "/settings?provider_saved=1")]).into_response()
     }
+}
+
+#[derive(Deserialize)]
+struct GeminiKeyPayload {
+    gemini_api_key: String,
+    #[serde(default)]
+    gemini_model: Option<String>,
+}
+
+async fn gemini_key_handler(
+    State(state): State<AppState>,
+    Form(form): Form<GeminiKeyPayload>,
+) -> Response {
+    let key_trimmed = form.gemini_api_key.trim();
+    if !key_trimmed.is_empty() {
+        let _ = set_setting(&state.pool, "gemini_api_key", key_trimmed).await;
+        let _ = set_setting(&state.pool, "ai_provider", "gemini_api").await;
+    }
+    if let Some(model) = form.gemini_model.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        let _ = set_setting(&state.pool, "gemini_model", model).await;
+        let _ = set_setting(&state.pool, "ai_model", model).await;
+    }
+    (
+        StatusCode::SEE_OTHER,
+        [(header::LOCATION, "/settings?gemini_saved=1")],
+    )
+        .into_response()
 }
 
 fn parse_smart_input_payload(headers: &HeaderMap, body: &Bytes) -> Result<SmartInputPayload> {
@@ -1348,6 +1522,23 @@ async fn settings_page_handler(State(state): State<AppState>) -> Response {
         .ok()
         .flatten()
         .unwrap_or_default();
+    let gemini_key = get_setting(&state.pool, "gemini_api_key")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    let masked_gemini_key = if gemini_key.len() > 8 {
+        format!("{}...{}", &gemini_key[..6], &gemini_key[gemini_key.len() - 4..])
+    } else if !gemini_key.is_empty() {
+        "********".to_string()
+    } else {
+        "".to_string()
+    };
+    let gemini_model = get_setting(&state.pool, "gemini_model")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "gemini-2.5-flash".to_string());
     let has_token = get_setting(&state.pool, "oauth_refresh_token")
         .await
         .ok()
@@ -1367,6 +1558,8 @@ async fn settings_page_handler(State(state): State<AppState>) -> Response {
         has_token,
         &project_id,
         &current_model,
+        &masked_gemini_key,
+        &gemini_model,
     ))
     .into_response()
 }
@@ -1397,8 +1590,15 @@ pub fn render_settings_page(
     has_token: bool,
     project_id: &str,
     current_model: &str,
+    masked_gemini_key: &str,
+    gemini_model: &str,
 ) -> String {
-    let oauth_checked = if current_provider != "agy_cli" {
+    let gemini_checked = if current_provider == "gemini_api" || (current_provider != "agy_cli" && current_provider != "oauth") {
+        "checked"
+    } else {
+        ""
+    };
+    let oauth_checked = if current_provider == "oauth" {
         "checked"
     } else {
         ""
@@ -1413,6 +1613,16 @@ pub fn render_settings_page(
     let flash_med_sel = if current_model == "gemini-3.8-flash-medium" { "selected" } else { "" };
     let argon_med_sel = if current_model == "gemini-4-argon-medium" { "selected" } else { "" };
     let claude_sel = if current_model.contains("claude") { "selected" } else { "" };
+
+    let g25_flash_sel = if gemini_model == "gemini-2.5-flash" || gemini_model.is_empty() { "selected" } else { "" };
+    let g25_pro_sel = if gemini_model == "gemini-2.5-pro" { "selected" } else { "" };
+    let g15_flash_sel = if gemini_model == "gemini-1.5-flash" { "selected" } else { "" };
+
+    let gemini_status_badge = if !masked_gemini_key.is_empty() {
+        format!(r#"<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:0.8rem;background:#064e3b;color:#34d399;font-weight:700;">🟢 등록됨 ({})</span>"#, escape_html(masked_gemini_key))
+    } else {
+        r#"<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:0.8rem;background:#334155;color:#94a3b8;font-weight:700;">⚪ 미등록</span>"#.to_string()
+    };
 
     let status_text = if has_token {
         format!(
@@ -1510,17 +1720,49 @@ pub fn render_settings_page(
       </form>
     </section>
 
+    <section class="panel" style="border-left:4px solid var(--primary);">
+      <h2>⚡ Gemini API 설정 (권장 — 무료 & 가장 안정적)</h2>
+      <p style="color:var(--text-muted);font-size:0.9rem;margin-top:0.25rem;margin-bottom:1rem;line-height:1.5;">
+        Google AI Studio에서 무료로 발급받은 Gemini API 키를 입력하시면 클라우드 서버에서도 오류 없이 즉시 스마트 인풋을 이용하실 수 있습니다.
+        <br>
+        👉 <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style="color:var(--primary);font-weight:700;text-decoration:underline;">Google AI Studio에서 무료 API 키 발급받기 (클릭)</a>
+      </p>
+      <form method="POST" action="/settings/gemini_key" style="max-width:540px;">
+        <div style="margin-bottom:0.75rem;">
+          <label for="gemini_api_key" style="font-weight:600;">Gemini API Key</label>
+          <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.25rem;">
+            등록 상태: {gemini_status_badge}
+          </div>
+          <input type="password" id="gemini_api_key" name="gemini_api_key" placeholder="AIzaSy... (새 키 입력 시 기존 키를 덮어씁니다)" autocomplete="off">
+        </div>
+
+        <div style="margin-bottom:1rem;">
+          <label for="gemini_model" style="font-weight:600;">사용할 Gemini 모델</label>
+          <select id="gemini_model" name="gemini_model" style="margin-top:0.25rem;">
+            <option value="gemini-2.5-flash" {g25_flash_sel}>⚡ Gemini 2.5 Flash (권장 — 초고속 / 고품질 한국어 맥락 청크 분석)</option>
+            <option value="gemini-2.5-pro" {g25_pro_sel}>🧠 Gemini 2.5 Pro (최상위 분석 성능)</option>
+            <option value="gemini-1.5-flash" {g15_flash_sel}>⚡ Gemini 1.5 Flash (경량 고속 모델)</option>
+          </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Gemini API 키 저장 및 활성화</button>
+      </form>
+    </section>
+
     <section class="panel">
       <h1>AI 엔진 및 모델 설정 (AI Engine & Model)</h1>
       <form method="POST" action="/settings/provider">
-        <label>
-          <input type="radio" name="provider" value="agy_cli" style="width:auto;" {cli_checked}>
-          <strong>로컬 Antigravity CLI (권장)</strong>
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;cursor:pointer;">
+          <input type="radio" name="provider" value="gemini_api" style="width:auto;" {gemini_checked}>
+          <strong>⚡ Google AI Studio Gemini API 키 (권장 — 개인 계정 무료 / 가장 안정적)</strong>
         </label>
-        <br>
-        <label>
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;cursor:pointer;">
+          <input type="radio" name="provider" value="agy_cli" style="width:auto;" {cli_checked}>
+          <span>💻 로컬 Antigravity CLI</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;cursor:pointer;">
           <input type="radio" name="provider" value="oauth" style="width:auto;" {oauth_checked}>
-          Google OAuth PKCE (Cloud Code Assist API)
+          <span>🏢 Google OAuth PKCE (Cloud Code Assist API — 기업/조직 라이선스 계정 전용)</span>
         </label>
 
         <label for="ai_model" style="display:block;margin-top:1.25rem;font-weight:600;">Antigravity CLI 실행 모델:</label>
@@ -1532,13 +1774,16 @@ pub fn render_settings_page(
         </select>
 
         <div style="margin-top:1rem;">
-          <button type="submit" class="btn btn-primary">설정 저장 (Save Settings)</button>
+          <button type="submit" class="btn btn-primary">선택 엔진 저장 (Save Provider)</button>
         </div>
       </form>
     </section>
 
     <section class="panel">
-      <h2>Google OAuth PKCE 브라우저 인증</h2>
+      <h2>Google OAuth PKCE 브라우저 인증 (기업/조직용)</h2>
+      <p style="color:var(--text-muted);font-size:0.85rem;">
+        ※ 구글 정책 변경으로 개인 계정은 Cloud Code Assist 무료 라이선스가 종료(403 Forbidden 발생)되었으므로, 위의 무료 <strong>Gemini API 키</strong> 사용을 권장합니다.
+      </p>
       <p>상태: <strong>{status}</strong></p>
       <p>
         1단계: 아래 링크를 열어 Google 계정으로 로그인하고 인증 코드를 복사하세요.<br>
