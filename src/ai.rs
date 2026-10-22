@@ -6,7 +6,7 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
+    Form, Json, Router,
 };
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{Duration, Utc};
@@ -698,6 +698,7 @@ pub fn routes() -> Router<AppState> {
         .route("/settings", get(settings_page_handler))
         .route("/settings/oauth/code", post(oauth_code_exchange_handler))
         .route("/settings/provider", post(provider_switch_handler))
+        .route("/settings/passcode", post(passcode_change_handler))
         .route("/smart-input", post(smart_input_handler))
         .route("/api/smart-input", post(api_smart_input_handler))
 }
@@ -1370,6 +1371,26 @@ async fn settings_page_handler(State(state): State<AppState>) -> Response {
     .into_response()
 }
 
+#[derive(Deserialize)]
+struct PasscodeChangePayload {
+    new_passcode: String,
+}
+
+async fn passcode_change_handler(
+    State(state): State<AppState>,
+    Form(form): Form<PasscodeChangePayload>,
+) -> Response {
+    let trimmed = form.new_passcode.trim();
+    if !trimmed.is_empty() {
+        let _ = set_setting(&state.pool, "custom_passcode", trimmed).await;
+    }
+    (
+        StatusCode::SEE_OTHER,
+        [(header::LOCATION, "/settings?passcode_saved=1")],
+    )
+        .into_response()
+}
+
 pub fn render_settings_page(
     oauth_url: &str,
     current_provider: &str,
@@ -1475,6 +1496,18 @@ pub fn render_settings_page(
           <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.4;">피치 블랙 배경과 발광하는 형광 그린 매트릭스 콘솔</div>
         </button>
       </div>
+    </section>
+
+    <section class="panel">
+      <h2>🔑 로그인 패스코드(비밀번호) 변경</h2>
+      <p style="color:var(--text-muted);font-size:0.9rem;margin-top:0.25rem;margin-bottom:1rem;">
+        앱 접속 시 입력하는 비밀번호를 변경할 수 있습니다. 저장 즉시 다음 로그인부터 적용됩니다.
+      </p>
+      <form method="POST" action="/settings/passcode" style="max-width:360px;">
+        <label for="new_passcode">새 비밀번호 (New Passcode)</label>
+        <input type="password" id="new_passcode" name="new_passcode" required placeholder="새 비밀번호 입력" autocomplete="new-password">
+        <button type="submit" class="btn btn-primary">비밀번호 변경 및 저장</button>
+      </form>
     </section>
 
     <section class="panel">

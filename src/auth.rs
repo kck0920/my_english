@@ -63,7 +63,19 @@ async fn login_submit(
     State(state): State<AppState>,
     Form(form): Form<LoginForm>,
 ) -> Response {
-    if verify_passcode(&form.passcode, &state.app_passcode) || form.passcode.trim() == "1234" {
+    let custom_passcode: Option<(String,)> =
+        sqlx::query_as("SELECT value FROM app_settings WHERE key = 'custom_passcode'")
+            .fetch_optional(&state.pool)
+            .await
+            .unwrap_or(None);
+
+    let is_valid = if let Some((custom,)) = custom_passcode {
+        verify_passcode(&form.passcode, &custom)
+    } else {
+        verify_passcode(&form.passcode, &state.app_passcode)
+    };
+
+    if is_valid {
         let token = sign_session_token("authenticated", &state.cookie_secret);
         let cookie = format!(
             "{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE_SECS}"
