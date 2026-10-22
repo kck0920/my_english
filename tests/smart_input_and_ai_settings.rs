@@ -628,7 +628,7 @@ async fn gemini_api_key_configuration_and_mock_generation() {
     let (app, pool, cookie) = test_app_with_pool().await;
 
     // 1. Submit Gemini API Key via /settings/gemini_key
-    let form = "gemini_api_key=AIzaSyFakeKey123456&gemini_model=gemini-2.5-flash";
+    let form = "gemini_api_key=AIzaSyFakeKey123456&gemini_model=gemini-3.5-flash";
     let res = app
         .clone()
         .oneshot(
@@ -661,7 +661,7 @@ async fn gemini_api_key_configuration_and_mock_generation() {
         .await
         .unwrap()
         .expect("gemini_model saved");
-    assert_eq!(saved_model, "gemini-2.5-flash");
+    assert_eq!(saved_model, "gemini-3.5-flash");
 
     // 2. Check that /settings page masks the key
     let res = app

@@ -470,7 +470,14 @@ impl GeminiApiKeyProvider {
     pub fn new(api_key: impl Into<String>, model: Option<String>) -> Self {
         let model = model
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| "gemini-2.5-flash".to_string());
+            .map(|s| {
+                if s.starts_with("gemini-2.5-flash") || s.starts_with("gemini-1.5-flash") || s.starts_with("gemini-2.0-flash") {
+                    "gemini-3.5-flash".to_string()
+                } else {
+                    s
+                }
+            })
+            .unwrap_or_else(|| "gemini-3.5-flash".to_string());
         Self {
             api_key: api_key.into(),
             model,
@@ -483,11 +490,6 @@ impl GeminiApiKeyProvider {
         prompt: &str,
         schema: serde_json::Value,
     ) -> Result<String> {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
-        );
-
         let payload = serde_json::json!({
             "contents": [
                 {
@@ -501,21 +503,48 @@ impl GeminiApiKeyProvider {
             }
         });
 
-        let resp = self
-            .client
-            .post(&url)
-            .json(&payload)
-            .send()
-            .await?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let err_text = resp.text().await.unwrap_or_default();
-            anyhow::bail!("Gemini API 에러 ({status}): {err_text}");
+        let mut models_to_try = vec![self.model.as_str()];
+        if self.model != "gemini-3.5-flash" {
+            models_to_try.push("gemini-3.5-flash");
+        }
+        if self.model != "gemini-3.5-flash-lite" {
+            models_to_try.push("gemini-3.5-flash-lite");
         }
 
-        let val: serde_json::Value = resp.json().await?;
-        extract_text_from_cloud_code_response(&val)
+        let mut last_error = String::new();
+        for model in models_to_try {
+            let url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={}",
+                self.api_key
+            );
+
+            let resp = self
+                .client
+                .post(&url)
+                .json(&payload)
+                .send()
+                .await?;
+
+            if resp.status().is_success() {
+                let val: serde_json::Value = resp.json().await?;
+                return extract_text_from_cloud_code_response(&val);
+            }
+
+            let status = resp.status();
+            let err_text = resp.text().await.unwrap_or_default();
+            last_error = format!("Gemini API 에러 ({status}) [모델 {model}]: {err_text}");
+
+            if status == reqwest::StatusCode::NOT_FOUND
+                || status == reqwest::StatusCode::SERVICE_UNAVAILABLE
+                || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            {
+                continue;
+            }
+
+            anyhow::bail!("{last_error}");
+        }
+
+        anyhow::bail!("{last_error}")
     }
 }
 
@@ -795,10 +824,11 @@ impl DynamicAiProvider {
             }
             let gemini_model = get_setting(&self.pool, "gemini_model").await?;
             let selected_model = match gemini_model {
-                Some(m) if !m.trim().is_empty() => m,
+                Some(m) if !m.trim().is_empty() && !m.starts_with("gemini-2.5") && !m.starts_with("gemini-1.5") && !m.starts_with("gemini-2.0") => m,
                 _ => get_setting(&self.pool, "ai_model")
                     .await?
-                    .unwrap_or_else(|| "gemini-2.5-flash".to_string()),
+                    .filter(|m| !m.starts_with("gemini-2.5") && !m.starts_with("gemini-1.5") && !m.starts_with("gemini-2.0"))
+                    .unwrap_or_else(|| "gemini-3.5-flash".to_string()),
             };
             Ok(Box::new(GeminiApiKeyProvider::new(api_key.trim(), Some(selected_model))))
         } else {
@@ -1614,9 +1644,10 @@ pub fn render_settings_page(
     let argon_med_sel = if current_model == "gemini-4-argon-medium" { "selected" } else { "" };
     let claude_sel = if current_model.contains("claude") { "selected" } else { "" };
 
-    let g25_flash_sel = if gemini_model == "gemini-2.5-flash" || gemini_model.is_empty() { "selected" } else { "" };
-    let g25_pro_sel = if gemini_model == "gemini-2.5-pro" { "selected" } else { "" };
-    let g15_flash_sel = if gemini_model == "gemini-1.5-flash" { "selected" } else { "" };
+    let g35_flash_sel = if gemini_model == "gemini-3.5-flash" || gemini_model.starts_with("gemini-2.5") || gemini_model.starts_with("gemini-1.5") || gemini_model.is_empty() { "selected" } else { "" };
+    let g35_lite_sel = if gemini_model == "gemini-3.5-flash-lite" { "selected" } else { "" };
+    let g3_preview_sel = if gemini_model == "gemini-3-flash-preview" { "selected" } else { "" };
+    let g38_flash_sel = if gemini_model == "gemini-3.8-flash" { "selected" } else { "" };
 
     let gemini_status_badge = if !masked_gemini_key.is_empty() {
         format!(r#"<span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:0.8rem;background:#064e3b;color:#34d399;font-weight:700;">🟢 등록됨 ({})</span>"#, escape_html(masked_gemini_key))
@@ -1739,9 +1770,10 @@ pub fn render_settings_page(
         <div style="margin-bottom:1rem;">
           <label for="gemini_model" style="font-weight:600;">사용할 Gemini 모델</label>
           <select id="gemini_model" name="gemini_model" style="margin-top:0.25rem;">
-            <option value="gemini-2.5-flash" {g25_flash_sel}>⚡ Gemini 2.5 Flash (권장 — 초고속 / 고품질 한국어 맥락 청크 분석)</option>
-            <option value="gemini-2.5-pro" {g25_pro_sel}>🧠 Gemini 2.5 Pro (최상위 분석 성능)</option>
-            <option value="gemini-1.5-flash" {g15_flash_sel}>⚡ Gemini 1.5 Flash (경량 고속 모델)</option>
+            <option value="gemini-3.5-flash" {g35_flash_sel}>⚡ Gemini 3.5 Flash (기본 권장 — 초고속 / 고품질 한국어 맥락 청크 분석)</option>
+            <option value="gemini-3.5-flash-lite" {g35_lite_sel}>⚡ Gemini 3.5 Flash-Lite (초경량 / 고속 응답)</option>
+            <option value="gemini-3-flash-preview" {g3_preview_sel}>⚡ Gemini 3 Flash Preview</option>
+            <option value="gemini-3.8-flash" {g38_flash_sel}>🧠 Gemini 3.8 Flash</option>
           </select>
         </div>
 
