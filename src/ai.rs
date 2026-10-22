@@ -19,7 +19,7 @@ use crate::domain::{
     detect_surface_chunk, DraftCard, OutputTransferEvaluation, OutputTransferPrompt,
 };
 use crate::state::AppState;
-use crate::ui::{escape_html, APP_CSS};
+use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META, ICON_SPARKLE};
 
 pub const GOOGLE_OAUTH_CLIENT_ID: &str =
     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
@@ -1116,36 +1116,26 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
         ));
     }
 
+    let navbar = render_navbar("home", None);
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {HEAD_META}
   <title>Draft Cards — My English</title>
-  <link rel="manifest" href="/manifest.json">
   <style>{APP_CSS}</style>
 </head>
 <body>
   <div id="toastNotification" style="position: fixed; top: 1.5rem; right: 1.5rem; z-index: 9999; padding: 0.85rem 1.25rem; background: #0f172a; color: #fff; border: 1px solid #10b981; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); display: none; font-weight: 600; align-items: center; gap: 0.5rem; transition: opacity 0.2s ease;"></div>
+  {navbar}
 
   <div class="container">
-    <header class="navbar">
-      <strong>My English</strong>
-      <nav class="nav-links">
-        <a href="/">홈 (Home)</a>
-        <a href="/review">복습 (Review)</a>
-        <a href="/audio-gym">Audio Gym</a>
-        <a href="/data">데이터 백업/가져오기</a>
-        <a href="/settings">설정</a>
-      </nav>
-    </header>
-
-    <section class="panel" id="smart-input-section">
-      <h2>Smart Input (AI 통합 입력창)</h2>
+    <section class="panel" id="smart-input-section" style="border-color: rgba(56, 189, 248, 0.25);">
+      <h2 style="display:flex; align-items:center; gap:0.5rem; font-size:1.15rem; margin-top:0;">{ICON_SPARKLE} <span>Smart Input (AI 통합 입력창)</span></h2>
       <form method="POST" action="/smart-input">
         <textarea name="input" rows="2">{user_input}</textarea>
-        <button type="submit" class="btn btn-primary">AI로 Draft Card 다시 생성</button>
+        <button type="submit" class="btn btn-primary">{ICON_SPARKLE} <span>AI로 Draft Card 다시 생성</span></button>
       </form>
     </section>
 
@@ -1154,10 +1144,10 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
         <h2 style="margin: 0;">생성된 Draft Card 후보 ({count}개)</h2>
         <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
           <button type="button" id="saveAllDraftsBtn" class="btn btn-primary" onclick="saveAllDrafts()" style="background: #2563eb;">⚡ 모든 Draft Card 일괄 저장</button>
-          <a href="/" class="btn" style="background: var(--card-bg, #1e293b); color: var(--text, #f8fafc); border: 1px solid var(--border, #334155); text-decoration: none; display: inline-flex; align-items: center;">홈 (Home)으로 이동</a>
+          <a href="/" class="btn" style="text-decoration: none; display: inline-flex; align-items: center;">홈 (Home)으로 이동</a>
         </div>
       </div>
-      <p style="color: var(--muted); font-size: 0.9rem;">필요하면 필드를 바로 인라인 수정한 뒤 원클릭으로 Study Card에 저장하세요. 저장 후에도 페이지를 벗어나지 않고 다른 후보들을 계속 추가할 수 있습니다.</p>
+      <p style="color: var(--text-muted); font-size: 0.9rem;">필요하면 필드를 바로 인라인 수정한 뒤 원클릭으로 Study Card에 저장하세요. 저장 후에도 페이지를 벗어나지 않고 다른 후보들을 계속 추가할 수 있습니다.</p>
       <div id="saveAllStatusBanner" style="display:none; padding: 0.85rem 1.15rem; border-radius: 8px; margin-bottom: 1.25rem; background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #10b981; font-weight: 600;"></div>
       <div class="card-grid">
         {drafts_html}
@@ -1416,29 +1406,19 @@ pub fn render_settings_page(
         "미연결 (인증 코드를 입력해 주세요)".to_string()
     };
 
+    let navbar = render_navbar("settings", None);
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {HEAD_META}
   <title>설정 — My English</title>
-  <link rel="manifest" href="/manifest.json">
   <style>{APP_CSS}</style>
 </head>
 <body>
+  {navbar}
   <div class="container">
-    <header class="navbar">
-      <strong>My English</strong>
-      <nav class="nav-links">
-        <a href="/">홈 (Home)</a>
-        <a href="/review">복습 (Review)</a>
-        <a href="/audio-gym">Audio Gym</a>
-        <a href="/data">데이터 백업/가져오기</a>
-        <a href="/settings">설정</a>
-      </nav>
-    </header>
-
     <section class="panel">
       <h1>AI 엔진 및 모델 설정 (AI Engine & Model)</h1>
       <form method="POST" action="/settings/provider">

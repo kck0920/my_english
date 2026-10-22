@@ -17,7 +17,7 @@ use sqlx::{sqlite::SqliteConnectOptions, Connection, Row, SqliteConnection, Sqli
 use crate::cards::{insert_study_card, list_study_cards};
 use crate::domain::{detect_surface_chunk, CreateStudyCardInput, ExtraExample, StudyCard};
 use crate::state::AppState;
-use crate::ui::{escape_html, APP_CSS};
+use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -1110,29 +1110,19 @@ pub fn render_data_page(notice: Option<&str>) -> String {
         None => String::new(),
     };
 
+    let navbar = render_navbar("data", None);
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {HEAD_META}
   <title>데이터 백업 &amp; 가져오기 — My English</title>
-  <link rel="manifest" href="/manifest.json">
   <style>{APP_CSS}</style>
 </head>
 <body>
+  {navbar}
   <div class="container">
-    <header class="navbar">
-      <strong>My English</strong>
-      <nav class="nav-links">
-        <a href="/">홈 (Home)</a>
-        <a href="/review">복습 (Review)</a>
-        <a href="/audio-gym">Audio Gym</a>
-        <a href="/data">데이터 백업/가져오기</a>
-        <a href="/settings">설정</a>
-      </nav>
-    </header>
-
     {notice_html}
 
     <section class="panel">

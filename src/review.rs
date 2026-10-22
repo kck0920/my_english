@@ -16,7 +16,7 @@ use crate::domain::{
     ExtraExample, ReviewRating, SrsTransition, StudyCard,
 };
 use crate::state::AppState;
-use crate::ui::{escape_html, APP_CSS};
+use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -392,10 +392,8 @@ pub fn render_output_transfer_prompt_page(
         r#"<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {HEAD_META}
   <title>Output Transfer Challenge - My English</title>
-  <link rel="manifest" href="/manifest.json">
   <style>{css}</style>
 </head>
 <body>
@@ -907,25 +905,20 @@ pub fn render_review_card_page(
         )
     };
 
+    let navbar = render_navbar("review", Some(due_count));
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {HEAD_META}
   <title>Review — My English</title>
-  <link rel="manifest" href="/manifest.json">
   <style>{APP_CSS}</style>
 </head>
 <body>
+  {navbar}
   <div class="container">
-    <header class="navbar">
-      <strong>My English — Review</strong>
-      <nav class="nav-links">
-        <a href="/">홈 (Home)</a>
-        <span>남은 복습 카드: <strong id="remaining-due-count">{due_count}</strong>장</span>
-      </nav>
-    </header>
+    <div style="display:none;" id="remaining-due-count-holder">남은 복습 카드: <strong id="remaining-due-count">{due_count}</strong>장</div>
     {body_section}
   </div>
   <script>
@@ -1042,29 +1035,26 @@ pub fn render_review_card_page(
 }
 
 pub fn render_review_complete_page(reviewed_today: i64) -> String {
+    let navbar = render_navbar("review", Some(0));
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {HEAD_META}
   <title>Review 완료 — My English</title>
-  <link rel="manifest" href="/manifest.json">
   <style>{APP_CSS}</style>
 </head>
 <body>
+  {navbar}
   <div class="container">
-    <header class="navbar">
-      <strong>My English — Review</strong>
-      <nav class="nav-links">
-        <a href="/">홈 (Home)</a>
-      </nav>
-    </header>
-    <section class="panel" id="review-complete-summary">
-      <h2>오늘의 Review를 모두 완료했습니다! (Review Complete)</h2>
-      <p>현재 대기 중인 복습 카드(Due Study Cards): <strong id="due-card-count">0</strong>장</p>
-      <p>오늘 완료한 복습 횟수: <strong>{reviewed_today}</strong>회</p>
-      <a href="/" class="btn btn-primary">홈 대시보드로 돌아가기</a>
+    <section class="panel" id="review-complete-summary" style="text-align:center; padding: 3rem 1.5rem;">
+      <h2 style="font-size: 1.5rem; margin-top:0;">🎉 오늘의 Review를 모두 완료했습니다! (Review Complete)</h2>
+      <p style="color: var(--text-muted); font-size:1.05rem;">현재 대기 중인 복습 카드(Due Study Cards): <strong id="due-card-count" class="count-pill-zero">0</strong>장</p>
+      <p style="color: var(--text-muted); font-size:1.05rem;">오늘 완료한 복습 횟수: <strong style="color: var(--accent);">{reviewed_today}</strong>회</p>
+      <div style="margin-top: 1.5rem;">
+        <a href="/" class="btn btn-primary" style="padding: 0.7rem 1.25rem;">홈 대시보드로 돌아가기</a>
+      </div>
     </section>
   </div>
 </body>

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::cards::list_study_cards;
 use crate::domain::StudyCard;
 use crate::state::AppState;
-use crate::ui::{escape_html, APP_CSS};
+use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META, ICON_AUDIO};
 
 /// Global in-memory bounded cache for synthesized TTS MP3 audio bytes.
 /// Key format: "{lang}:{gender}:{trimmed_text}"
@@ -372,28 +372,30 @@ pub async fn audio_gym_page(
         "female"
     };
 
+    let navbar = render_navbar("gym", Some(due_count as i64));
+
     let html = format!(
         r#"<!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {HEAD_META}
     <title>Audio Gym - My English</title>
-    <link rel="manifest" href="/manifest.json">
     <style>
         {css}
         .gym-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }}
-        .gym-stage {{ background: var(--bg-card); border-radius: 1rem; padding: 2rem 1.5rem; text-align: center; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); margin-bottom: 1.5rem; border: 1px solid var(--border); }}
-        .gym-step-indicator {{ font-size: 0.875rem; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }}
-        .gym-korean {{ font-size: 1.25rem; font-weight: 600; color: var(--text-dark); margin-bottom: 1rem; min-height: 2rem; }}
-        .gym-chunk {{ font-size: 1.5rem; font-weight: 700; color: var(--primary); margin-bottom: 0.5rem; min-height: 2.25rem; }}
-        .gym-sentence {{ font-size: 1.125rem; color: var(--text-muted); line-height: 1.6; min-height: 3rem; }}
-        .gym-timer {{ font-size: 3.5rem; font-weight: 800; color: var(--accent); margin: 1rem 0; font-variant-numeric: tabular-nums; }}
+        .gym-stage {{ background: var(--surface-card); border-radius: var(--radius); padding: 2.25rem 1.5rem; text-align: center; box-shadow: var(--shadow-lg); margin-bottom: 1.5rem; border: 1px solid var(--border); transition: border-color 0.2s; }}
+        .gym-step-indicator {{ font-size: 0.875rem; font-weight: 700; color: var(--primary-light); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; }}
+        .gym-korean {{ font-size: 1.25rem; font-weight: 600; color: var(--text); margin-bottom: 1rem; min-height: 2rem; }}
+        .gym-chunk {{ font-size: 1.6rem; font-weight: 700; color: var(--primary-light); margin-bottom: 0.5rem; min-height: 2.25rem; letter-spacing: -0.01em; }}
+        .gym-sentence {{ font-size: 1.15rem; color: #cbd5e1; line-height: 1.6; min-height: 3rem; }}
+        .gym-timer {{ font-size: 3.75rem; font-weight: 800; color: var(--accent); margin: 1rem 0; font-variant-numeric: tabular-nums; text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }}
         .gym-controls {{ display: flex; gap: 0.75rem; justify-content: center; align-items: center; margin-bottom: 1.5rem; }}
-        .gym-btn {{ padding: 0.75rem 1.5rem; border-radius: 0.75rem; font-size: 1rem; font-weight: 700; cursor: pointer; border: none; }}
-        .gym-btn-primary {{ background: var(--primary); color: white; }}
-        .gym-btn-secondary {{ background: var(--bg-hover); color: var(--text-dark); }}
-        .gym-config {{ display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1.5rem; font-size: 0.875rem; }}
+        .gym-btn {{ padding: 0.75rem 1.6rem; border-radius: var(--radius-sm); font-size: 1rem; font-weight: 700; cursor: pointer; border: 1px solid var(--border); transition: all 0.18s; }}
+        .gym-btn-primary {{ background: linear-gradient(135deg, #2563eb, #1d4ed8); border-color: #3b82f6; color: white; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); }}
+        .gym-btn-primary:hover {{ background: linear-gradient(135deg, #3b82f6, #2563eb); transform: translateY(-1px); }}
+        .gym-btn-secondary {{ background: var(--surface-card); color: var(--text); }}
+        .gym-btn-secondary:hover {{ background: var(--surface-hover); transform: translateY(-1px); }}
+        .gym-config {{ display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; font-size: 0.875rem; }}
         .sound-wave {{ display: inline-flex; align-items: center; gap: 2px; height: 14px; vertical-align: middle; }}
         .sound-wave span {{ display: block; width: 3px; height: 100%; background: currentColor; border-radius: 2px; animation: gym-wave 0.9s infinite ease-in-out; }}
         .sound-wave span:nth-child(1) {{ animation-delay: -0.4s; }}
@@ -403,11 +405,11 @@ pub async fn audio_gym_page(
     </style>
 </head>
 <body>
+    {navbar}
     <div class="container">
         <div class="gym-header">
             <div>
-                <a href="/" style="text-decoration: none; font-size: 0.875rem; color: var(--primary);">← 홈으로</a>
-                <h1 style="margin: 0.25rem 0 0 0; font-size: 1.5rem;">🎧 Audio Gym</h1>
+                <h1 style="margin: 0; font-size: 1.5rem; display: flex; align-items: center; gap: 0.5rem;">{ICON_AUDIO} <span>Audio Gym</span></h1>
             </div>
             <div style="font-size: 0.875rem; color: var(--text-muted);">
                 오늘 복습 대상: <strong>{due_count}</strong>개 (전체: {all_count}개)

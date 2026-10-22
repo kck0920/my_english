@@ -27,6 +27,8 @@ pub fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(health_handler))
         .route("/favicon.ico", get(favicon_handler))
+        .route("/favicon.svg", get(favicon_handler))
+        .route("/icon.svg", get(favicon_handler))
         .route("/login", get(login_page).post(login_submit))
         .route("/logout", post(logout_submit))
         .route("/manifest.json", get(manifest_handler))
@@ -36,8 +38,14 @@ async fn health_handler() -> &'static str {
     "ok"
 }
 
-async fn favicon_handler() -> StatusCode {
-    StatusCode::NO_CONTENT
+async fn favicon_handler() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "image/svg+xml"),
+            (header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        ui::FAVICON_SVG,
+    )
 }
 
 async fn manifest_handler() -> impl IntoResponse {
