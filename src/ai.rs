@@ -1420,6 +1420,64 @@ pub fn render_settings_page(
   {navbar}
   <div class="container">
     <section class="panel">
+      <h2>🎨 비주얼 테마 설정 (Visual Themes)</h2>
+      <p style="color:var(--text-muted);font-size:0.9rem;margin-top:0.25rem;margin-bottom:1.15rem;">
+        취향과 학습 환경에 맞춰 5가지 고유 테마를 선택할 수 있습니다. 상단 네비게이션 바의 테마 선택기에서도 언제든 즉시 변경됩니다.
+      </p>
+      <div class="theme-cards-grid">
+        <button type="button" class="theme-card-option" data-theme-val="obsidian" onclick="window.switchTheme('obsidian')">
+          <div class="theme-card-preview" style="background:#090d16;border:1px solid #1e293b;">
+            <div class="theme-card-dot" style="background:#2563eb;"></div>
+            <div class="theme-card-dot" style="background:#38bdf8;"></div>
+            <div class="theme-card-dot" style="background:#10b981;"></div>
+          </div>
+          <div style="font-weight:700;font-size:0.95rem;color:var(--text);">🌌 옵시디언 블루 (Obsidian)</div>
+          <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.4;">세련된 딥 네이비 사이버 다크와 일렉트릭 블루 액센트</div>
+        </button>
+
+        <button type="button" class="theme-card-option" data-theme-val="nordic" onclick="window.switchTheme('nordic')">
+          <div class="theme-card-preview" style="background:#09130e;border:1px solid #1e3b2c;">
+            <div class="theme-card-dot" style="background:#059669;"></div>
+            <div class="theme-card-dot" style="background:#34d399;"></div>
+            <div class="theme-card-dot" style="background:#eab308;"></div>
+          </div>
+          <div style="font-weight:700;font-size:0.95rem;color:var(--text);">🌲 포레스트 노르딕 (Nordic)</div>
+          <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.4;">눈이 편안한 깊은 침엽수림 에버그린과 세이지 그린</div>
+        </button>
+
+        <button type="button" class="theme-card-option" data-theme-val="paper" onclick="window.switchTheme('paper')">
+          <div class="theme-card-preview" style="background:#f8f6f0;border:1px solid #dfdbce;">
+            <div class="theme-card-dot" style="background:#2563eb;"></div>
+            <div class="theme-card-dot" style="background:#d97706;"></div>
+            <div class="theme-card-dot" style="background:#1a1714;"></div>
+          </div>
+          <div style="font-weight:700;font-size:0.95rem;color:var(--text);">📜 페이퍼 미니멀 (Paper Light)</div>
+          <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.4;">따뜻한 양장본 서적 느낌의 고대비 종이 질감 라이트 모드</div>
+        </button>
+
+        <button type="button" class="theme-card-option" data-theme-val="sunset" onclick="window.switchTheme('sunset')">
+          <div class="theme-card-preview" style="background:#13100f;border:1px solid #382d26;">
+            <div class="theme-card-dot" style="background:#d97706;"></div>
+            <div class="theme-card-dot" style="background:#fbbf24;"></div>
+            <div class="theme-card-dot" style="background:#10b981;"></div>
+          </div>
+          <div style="font-weight:700;font-size:0.95rem;color:var(--text);">☕ 선셋 앰버 (Sunset & Coffee)</div>
+          <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.4;">아늑한 에스프레소 카페와 저녁 촛불 노을빛 감성</div>
+        </button>
+
+        <button type="button" class="theme-card-option" data-theme-val="terminal" onclick="window.switchTheme('terminal')">
+          <div class="theme-card-preview" style="background:#050805;border:1px solid #16301f;">
+            <div class="theme-card-dot" style="background:#22c55e;"></div>
+            <div class="theme-card-dot" style="background:#4ade80;"></div>
+            <div class="theme-card-dot" style="background:#06b6d4;"></div>
+          </div>
+          <div style="font-weight:700;font-size:0.95rem;color:var(--text);">📟 사이버 터미널 (Retro Terminal)</div>
+          <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.4;">피치 블랙 배경과 발광하는 형광 그린 매트릭스 콘솔</div>
+        </button>
+      </div>
+    </section>
+
+    <section class="panel">
       <h1>AI 엔진 및 모델 설정 (AI Engine & Model)</h1>
       <form method="POST" action="/settings/provider">
         <label>

@@ -35,7 +35,47 @@ pub const HEAD_META: &str = r##"<meta charset="UTF-8">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="alternate icon" href="/favicon.ico">
   <link rel="apple-touch-icon" href="/favicon.svg">
-  <link rel="manifest" href="/manifest.json">"##;
+  <link rel="manifest" href="/manifest.json">
+  <script>
+    (function() {
+      try {
+        var t = localStorage.getItem('my_english_theme') || 'obsidian';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+    function switchTheme(t) {
+      try {
+        document.documentElement.setAttribute('data-theme', t);
+        localStorage.setItem('my_english_theme', t);
+        var sels = document.querySelectorAll('.theme-select-input');
+        sels.forEach(function(s) { s.value = t; });
+        var cards = document.querySelectorAll('.theme-card-option');
+        cards.forEach(function(c) {
+          if (c.getAttribute('data-theme-val') === t) {
+            c.classList.add('active');
+          } else {
+            c.classList.remove('active');
+          }
+        });
+      } catch (e) {}
+    }
+    window.switchTheme = switchTheme;
+    document.addEventListener('DOMContentLoaded', function() {
+      try {
+        var t = document.documentElement.getAttribute('data-theme') || 'obsidian';
+        var sels = document.querySelectorAll('.theme-select-input');
+        sels.forEach(function(s) { s.value = t; });
+        var cards = document.querySelectorAll('.theme-card-option');
+        cards.forEach(function(c) {
+          if (c.getAttribute('data-theme-val') === t) {
+            c.classList.add('active');
+          } else {
+            c.classList.remove('active');
+          }
+        });
+      } catch (e) {}
+    });
+  </script>"##;
 
 pub fn render_pwa_manifest() -> &'static str {
     r##"{
@@ -83,6 +123,7 @@ pub const ICON_SPARKLE: &str = r##"<svg width="15" height="15" viewBox="0 0 24 2
 pub const ICON_SPEAKER: &str = r##"<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>"##;
 pub const ICON_TAG: &str = r##"<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z"/><circle cx="7" cy="7" r="1.5" fill="currentColor"/></svg>"##;
 pub const ICON_CHECK: &str = r##"<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>"##;
+pub const ICON_PALETTE: &str = r##"<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>"##;
 
 pub fn render_navbar(active: &str, due_count: Option<i64>) -> String {
     let home_cls = if active == "home" { "active" } else { "" };
@@ -110,6 +151,16 @@ pub fn render_navbar(active: &str, due_count: Option<i64>) -> String {
         <a href="/audio-gym" class="{gym_cls}">{ICON_AUDIO} <span>Audio Gym</span></a>
         <a href="/data" class="{data_cls}">{ICON_DATA} <span>데이터 백업/가져오기</span></a>
         <a href="/settings" class="{settings_cls}">{ICON_SETTINGS} <span>설정</span></a>
+        <div class="theme-picker" title="테마 선택">
+          {ICON_PALETTE}
+          <select class="theme-select-input" onchange="window.switchTheme(this.value)" aria-label="테마 선택">
+            <option value="obsidian">🌌 옵시디언</option>
+            <option value="nordic">🌲 노르딕</option>
+            <option value="paper">📜 페이퍼</option>
+            <option value="sunset">☕ 선셋</option>
+            <option value="terminal">📟 터미널</option>
+          </select>
+        </div>
         <form method="POST" action="/logout" style="display:inline;margin:0;">
           <button type="submit" title="로그아웃">{ICON_LOGOUT} <span>로그아웃</span></button>
         </form>
@@ -119,9 +170,15 @@ pub fn render_navbar(active: &str, due_count: Option<i64>) -> String {
 }
 
 pub const APP_CSS: &str = r#"
-:root {
+/* ==========================================================================
+   MULTI-THEME PALETTES (5 Distinct Aesthetic Themes - Absolutely No Purple)
+   ========================================================================== */
+
+/* 1. 🌌 Obsidian Cyber Blue (Default) */
+:root, [data-theme="obsidian"] {
+  --theme-name: "obsidian";
   --bg: #090d16;
-  --bg-mesh: radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.08) 0px, transparent 50%),
+  --bg-mesh: radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.09) 0px, transparent 50%),
              radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.05) 0px, transparent 50%);
   --surface: #111827;
   --surface-card: #131d2e;
@@ -131,6 +188,7 @@ pub const APP_CSS: &str = r#"
   --border-hover: #2e3e58;
   --border-accent: #38bdf8;
   --text: #f8fafc;
+  --text-hover: #ffffff;
   --text-muted: #94a3b8;
   --text-dim: #64748b;
   --primary: #2563eb;
@@ -141,6 +199,17 @@ pub const APP_CSS: &str = r#"
   --warning: #f59e0b;
   --danger: #ef4444;
   --danger-hover: #dc2626;
+  --navbar-bg: rgba(9, 13, 22, 0.88);
+  --btn-primary-bg: linear-gradient(135deg, #2563eb, #1d4ed8);
+  --btn-primary-hover: linear-gradient(135deg, #3b82f6, #2563eb);
+  --btn-primary-border: #3b82f6;
+  --btn-accent-bg: linear-gradient(135deg, #10b981, #059669);
+  --btn-accent-hover: linear-gradient(135deg, #34d399, #10b981);
+  --btn-accent-border: #34d399;
+  --badge-bg: rgba(56, 189, 248, 0.1);
+  --badge-border: rgba(56, 189, 248, 0.25);
+  --nuance-bg: rgba(11, 17, 32, 0.7);
+  --review-banner-bg: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(6, 182, 212, 0.04));
   --radius-sm: 8px;
   --radius: 14px;
   --radius-lg: 18px;
@@ -148,6 +217,186 @@ pub const APP_CSS: &str = r#"
   --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.55);
 }
+
+/* 2. 🌲 Forest Nordic (Calm Scandinavian Pine & Sage) */
+[data-theme="nordic"] {
+  --theme-name: "nordic";
+  --bg: #09130e;
+  --bg-mesh: radial-gradient(at 0% 0%, rgba(16, 185, 129, 0.1) 0px, transparent 50%),
+             radial-gradient(at 100% 100%, rgba(5, 150, 105, 0.06) 0px, transparent 50%);
+  --surface: #0f1e16;
+  --surface-card: #13241b;
+  --surface-hover: #1b3225;
+  --surface-subtle: #0b1711;
+  --border: #1e3b2c;
+  --border-hover: #2d5540;
+  --border-accent: #34d399;
+  --text: #f0f7f4;
+  --text-hover: #ffffff;
+  --text-muted: #95ad9e;
+  --text-dim: #5c7466;
+  --primary: #059669;
+  --primary-hover: #047857;
+  --primary-light: #34d399;
+  --accent: #eab308;
+  --accent-hover: #ca8a04;
+  --warning: #f59e0b;
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+  --navbar-bg: rgba(9, 19, 14, 0.9);
+  --btn-primary-bg: linear-gradient(135deg, #059669, #047857);
+  --btn-primary-hover: linear-gradient(135deg, #10b981, #059669);
+  --btn-primary-border: #10b981;
+  --btn-accent-bg: linear-gradient(135deg, #eab308, #ca8a04);
+  --btn-accent-hover: linear-gradient(135deg, #facc15, #eab308);
+  --btn-accent-border: #facc15;
+  --badge-bg: rgba(52, 211, 153, 0.1);
+  --badge-border: rgba(52, 211, 153, 0.25);
+  --nuance-bg: rgba(11, 23, 17, 0.7);
+  --review-banner-bg: linear-gradient(135deg, rgba(5, 150, 105, 0.12), rgba(234, 179, 8, 0.05));
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.6);
+}
+
+/* 3. 📜 Paper Minimal (Warm Editorial High-Legibility Light Mode) */
+[data-theme="paper"] {
+  --theme-name: "paper";
+  --bg: #f8f6f0;
+  --bg-mesh: radial-gradient(at 0% 0%, rgba(180, 83, 9, 0.035) 0px, transparent 50%),
+             radial-gradient(at 100% 100%, rgba(37, 99, 235, 0.025) 0px, transparent 50%);
+  --surface: #ffffff;
+  --surface-card: #ffffff;
+  --surface-hover: #f1efe6;
+  --surface-subtle: #eeece2;
+  --border: #dfdbce;
+  --border-hover: #c7c1b0;
+  --border-accent: #2563eb;
+  --text: #1a1714;
+  --text-hover: #000000;
+  --text-muted: #57524a;
+  --text-dim: #847d73;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-light: #1d4ed8;
+  --accent: #d97706;
+  --accent-hover: #b45309;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --danger-hover: #b91c1c;
+  --navbar-bg: rgba(248, 246, 240, 0.94);
+  --btn-primary-bg: linear-gradient(135deg, #2563eb, #1d4ed8);
+  --btn-primary-hover: linear-gradient(135deg, #1d4ed8, #1e40af);
+  --btn-primary-border: #1d4ed8;
+  --btn-accent-bg: linear-gradient(135deg, #d97706, #b45309);
+  --btn-accent-hover: linear-gradient(135deg, #b45309, #92400e);
+  --btn-accent-border: #d97706;
+  --badge-bg: rgba(37, 99, 235, 0.08);
+  --badge-border: rgba(37, 99, 235, 0.2);
+  --nuance-bg: #f2f0e6;
+  --review-banner-bg: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(217, 119, 6, 0.04));
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow: 0 4px 16px -2px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 28px -4px rgba(0, 0, 0, 0.1);
+}
+
+/* 4. ☕ Sunset Amber (Cozy Espresso Cafe & Warm Amber Glow) */
+[data-theme="sunset"] {
+  --theme-name: "sunset";
+  --bg: #13100e;
+  --bg-mesh: radial-gradient(at 0% 0%, rgba(245, 158, 11, 0.09) 0px, transparent 50%),
+             radial-gradient(at 100% 100%, rgba(234, 88, 12, 0.05) 0px, transparent 50%);
+  --surface: #1c1714;
+  --surface-card: #231d19;
+  --surface-hover: #302722;
+  --surface-subtle: #161210;
+  --border: #382d26;
+  --border-hover: #4e3f35;
+  --border-accent: #fbbf24;
+  --text: #fef3c7;
+  --text-hover: #ffffff;
+  --text-muted: #bfa58f;
+  --text-dim: #7a6859;
+  --primary: #d97706;
+  --primary-hover: #b45309;
+  --primary-light: #fbbf24;
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --warning: #f59e0b;
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+  --navbar-bg: rgba(19, 16, 14, 0.9);
+  --btn-primary-bg: linear-gradient(135deg, #d97706, #b45309);
+  --btn-primary-hover: linear-gradient(135deg, #f59e0b, #d97706);
+  --btn-primary-border: #f59e0b;
+  --btn-accent-bg: linear-gradient(135deg, #10b981, #059669);
+  --btn-accent-hover: linear-gradient(135deg, #34d399, #10b981);
+  --btn-accent-border: #34d399;
+  --badge-bg: rgba(251, 191, 36, 0.1);
+  --badge-border: rgba(251, 191, 36, 0.25);
+  --nuance-bg: rgba(22, 18, 16, 0.7);
+  --review-banner-bg: linear-gradient(135deg, rgba(217, 119, 6, 0.1), rgba(16, 185, 129, 0.04));
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.6);
+}
+
+/* 5. 📟 Cyber Terminal (Hacker Retro Phosphor Green) */
+[data-theme="terminal"] {
+  --theme-name: "terminal";
+  --bg: #050805;
+  --bg-mesh: radial-gradient(at 0% 0%, rgba(34, 197, 94, 0.08) 0px, transparent 50%),
+             radial-gradient(at 100% 100%, rgba(6, 182, 212, 0.04) 0px, transparent 50%);
+  --surface: #0a110c;
+  --surface-card: #0d1710;
+  --surface-hover: #142419;
+  --surface-subtle: #070d08;
+  --border: #16301f;
+  --border-hover: #234c31;
+  --border-accent: #22c55e;
+  --text: #dcfce7;
+  --text-hover: #ffffff;
+  --text-muted: #86efac;
+  --text-dim: #4ade80;
+  --primary: #22c55e;
+  --primary-hover: #16a34a;
+  --primary-light: #4ade80;
+  --accent: #06b6d4;
+  --accent-hover: #0891b2;
+  --warning: #eab308;
+  --danger: #f87171;
+  --danger-hover: #ef4444;
+  --navbar-bg: rgba(5, 8, 5, 0.92);
+  --btn-primary-bg: linear-gradient(135deg, #16a34a, #15803d);
+  --btn-primary-hover: linear-gradient(135deg, #22c55e, #16a34a);
+  --btn-primary-border: #22c55e;
+  --btn-accent-bg: linear-gradient(135deg, #0891b2, #0e7490);
+  --btn-accent-hover: linear-gradient(135deg, #06b6d4, #0891b2);
+  --btn-accent-border: #06b6d4;
+  --badge-bg: rgba(34, 197, 94, 0.1);
+  --badge-border: rgba(34, 197, 94, 0.25);
+  --nuance-bg: rgba(7, 13, 8, 0.7);
+  --review-banner-bg: linear-gradient(135deg, rgba(34, 197, 94, 0.1), rgba(6, 182, 212, 0.04));
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 18px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.6);
+  --shadow-lg: 0 12px 32px -4px rgba(0, 0, 0, 0.7);
+}
+
+/* ==========================================================================
+   GLOBAL LAYOUT & BASE STYLES
+   ========================================================================== */
 
 * { box-sizing: border-box; }
 
@@ -161,6 +410,7 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 .container {
@@ -178,11 +428,12 @@ header.navbar {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(9, 13, 22, 0.88);
+  background: var(--navbar-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--border);
   margin-bottom: 1.5rem;
+  transition: background 0.25s ease, border-color 0.25s ease;
 }
 
 .brand-logo {
@@ -200,8 +451,8 @@ header.navbar {
   font-size: 0.7rem;
   font-weight: 600;
   color: var(--primary-light);
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: var(--badge-bg);
+  border: 1px solid var(--badge-border);
   padding: 2px 7px;
   border-radius: 999px;
   margin-left: 2px;
@@ -234,7 +485,7 @@ header.navbar {
 .nav-links a:hover, .nav-links button:hover, .btn:hover {
   background: var(--surface-hover);
   border-color: var(--border-hover);
-  color: #fff;
+  color: var(--text-hover);
   transform: translateY(-1px);
 }
 
@@ -243,12 +494,46 @@ header.navbar {
 }
 
 .nav-links a.active {
-  background: rgba(37, 99, 235, 0.15);
-  border-color: rgba(56, 189, 248, 0.4);
+  background: var(--badge-bg);
+  border-color: var(--border-accent);
   color: var(--primary-light);
   font-weight: 600;
 }
 
+/* Theme Selector in Navbar */
+.theme-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  padding: 0.38rem 0.65rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.825rem;
+  transition: all 0.18s ease;
+}
+
+.theme-picker:hover {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.theme-select-input {
+  background: transparent !important;
+  border: none !important;
+  color: var(--text) !important;
+  font-size: 0.825rem !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: auto !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Badges & Counters */
 .count-pill {
   background: var(--accent);
   color: #fff;
@@ -279,31 +564,32 @@ header.navbar {
   line-height: 1.2;
 }
 
+/* Buttons */
 .btn-primary {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  border: 1px solid #3b82f6;
+  background: var(--btn-primary-bg) !important;
+  border: 1px solid var(--btn-primary-border) !important;
   color: #fff !important;
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
-  border-color: #60a5fa;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.5);
+  background: var(--btn-primary-hover) !important;
+  border-color: var(--primary-light) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 .btn-accent {
-  background: linear-gradient(135deg, #10b981, #059669);
-  border: 1px solid #34d399;
+  background: var(--btn-accent-bg) !important;
+  border: 1px solid var(--btn-accent-border) !important;
   color: #fff !important;
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .btn-accent:hover {
-  background: linear-gradient(135deg, #34d399, #10b981);
-  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.5);
+  background: var(--btn-accent-hover) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 .btn-danger {
@@ -314,10 +600,11 @@ header.navbar {
 
 .btn-danger:hover {
   background: rgba(239, 68, 68, 0.12);
-  border-color: #ef4444;
+  border-color: var(--danger);
   color: #fff !important;
 }
 
+/* Panels & Cards */
 .panel {
   background: var(--surface-card);
   border: 1px solid var(--border);
@@ -325,7 +612,7 @@ header.navbar {
   padding: 1.25rem 1.5rem;
   margin-bottom: 1.5rem;
   box-shadow: var(--shadow);
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s ease, background 0.2s ease;
 }
 
 .panel:hover {
@@ -338,8 +625,8 @@ header.navbar {
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(6, 182, 212, 0.04));
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  background: var(--review-banner-bg);
+  border: 1px solid var(--border-accent);
   border-left: 4px solid var(--accent);
 }
 
@@ -354,12 +641,12 @@ header.navbar {
   border-radius: var(--radius);
   padding: 1.25rem 1.4rem;
   box-shadow: var(--shadow);
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
 }
 
 .study-card:hover {
-  border-color: rgba(56, 189, 248, 0.35);
-  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.5);
+  border-color: var(--border-accent);
+  box-shadow: 0 6px 20px -2px rgba(0, 0, 0, 0.45);
 }
 
 .chunk-header {
@@ -383,8 +670,8 @@ header.navbar {
   border-radius: 999px;
   font-size: 0.78rem;
   font-weight: 600;
-  background: rgba(56, 189, 248, 0.1);
-  border: 1px solid rgba(56, 189, 248, 0.25);
+  background: var(--badge-bg);
+  border: 1px solid var(--badge-border);
   color: var(--primary-light);
 }
 
@@ -406,6 +693,14 @@ header.navbar {
 .stage-badge[data-stage="3"] { background: rgba(96, 165, 250, 0.1); color: #60a5fa; border-color: rgba(96, 165, 250, 0.25); }
 .stage-badge[data-stage="4"] { background: rgba(59, 130, 246, 0.12); color: #93c5fd; border-color: rgba(59, 130, 246, 0.3); }
 .stage-badge[data-stage="5"] { background: rgba(251, 191, 36, 0.1); color: #fbbf24; border-color: rgba(251, 191, 36, 0.25); }
+
+/* Paper Theme Light Mode Overrides for Stage Badges */
+[data-theme="paper"] .stage-badge[data-stage="0"] { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+[data-theme="paper"] .stage-badge[data-stage="1"] { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+[data-theme="paper"] .stage-badge[data-stage="2"] { background: #f0f9ff; color: #0369a1; border-color: #bae6fd; }
+[data-theme="paper"] .stage-badge[data-stage="3"] { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+[data-theme="paper"] .stage-badge[data-stage="4"] { background: #e0f2fe; color: #0284c7; border-color: #7dd3fc; }
+[data-theme="paper"] .stage-badge[data-stage="5"] { background: #fffbeb; color: #b45309; border-color: #fde68a; }
 
 .tag-badge {
   display: inline-flex;
@@ -429,7 +724,7 @@ header.navbar {
 .context-sentence {
   font-size: 1.05rem;
   line-height: 1.6;
-  color: #e2e8f0;
+  color: var(--text);
   margin: 0.75rem 0 0.4rem;
 }
 
@@ -444,7 +739,7 @@ header.navbar {
   margin: 0.5rem 0;
   padding-left: 1.25rem;
   font-size: 0.9rem;
-  color: #cbd5e1;
+  color: var(--text-muted);
 }
 
 .extra-examples li {
@@ -452,15 +747,16 @@ header.navbar {
 }
 
 .nuance-note {
-  background: rgba(11, 17, 32, 0.7);
+  background: var(--nuance-bg);
   border-left: 3px solid var(--primary-light);
   border-radius: 4px;
   padding: 0.5rem 0.75rem;
   font-size: 0.88rem;
-  color: #cbd5e1;
+  color: var(--text);
   margin: 0.6rem 0;
 }
 
+/* Forms & Inputs */
 input, textarea, select {
   width: 100%;
   background: var(--surface-subtle);
@@ -477,8 +773,8 @@ input, textarea, select {
 
 input:focus, textarea:focus, select:focus {
   outline: none;
-  border-color: var(--primary-light);
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
 }
 
 label {
@@ -534,6 +830,68 @@ details summary:hover {
   color: #6ee7b7;
 }
 
+[data-theme="paper"] .alert-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+[data-theme="paper"] .alert-success {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #047857;
+}
+
+/* Theme Picker Cards (Settings Page) */
+.theme-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.theme-card-option {
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--surface-card);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  text-align: left;
+  width: 100%;
+}
+
+.theme-card-option:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-accent);
+  box-shadow: var(--shadow);
+}
+
+.theme-card-option.active {
+  border-color: var(--primary-light);
+  box-shadow: 0 0 0 2px var(--primary-light);
+}
+
+.theme-card-preview {
+  height: 54px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.2);
+}
+
+.theme-card-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
 @media (max-width: 640px) {
   header.navbar {
     flex-direction: column;
@@ -547,6 +905,9 @@ details summary:hover {
   }
   .container {
     padding: 0.75rem 1rem 2rem;
+  }
+  .theme-cards-grid {
+    grid-template-columns: 1fr;
   }
 }
 "#;
