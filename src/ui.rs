@@ -246,40 +246,42 @@ pub fn render_navbar(active: &str, due_count: Option<i64>) -> String {
 
     format!(
         r#"<header class="navbar">
-      <div class="navbar-left">
+      <div class="navbar-brand-wrap">
         <a href="/" class="brand-logo">
           {ICON_LOGO}
           <span>My English</span>
           <span class="brand-badge">Chunk &amp; SRS</span>
         </a>
+      </div>
+      <nav class="nav-links">
+        <a href="/" class="{home_cls}">{ICON_HOME} <span>홈<span class="nav-label-long"> (Home)</span></span></a>
+        <a href="/review" class="{review_cls}">{ICON_REVIEW} <span>복습<span class="nav-label-long"> (Review)</span>{due_badge}</span></a>
+        <a href="/audio-gym" class="{gym_cls}">{ICON_AUDIO} <span>Audio Gym</span></a>
+        <a href="/data" class="{data_cls}">{ICON_DATA} <span>데이터<span class="nav-label-long"> 백업/가져오기</span></span></a>
+        <a href="/settings" class="{settings_cls}">{ICON_SETTINGS} <span>설정</span></a>
+      </nav>
+      <div class="navbar-actions">
         <div class="voice-picker" title="TTS 음성(보이스) 선택">
           <span class="voice-picker-icon">🎙️</span>
           <select class="voice-select-input" onchange="window.switchVoiceGender(this.value)" aria-label="TTS 음성 선택">
-            <option value="female">👩 여성 음성</option>
-            <option value="male">👨 남성 음성</option>
+            <option value="female">여성 음성</option>
+            <option value="male">남성 음성</option>
           </select>
         </div>
-      </div>
-      <nav class="nav-links">
-        <a href="/" class="{home_cls}">{ICON_HOME} <span>홈 (Home)</span></a>
-        <a href="/review" class="{review_cls}">{ICON_REVIEW} <span>복습 (Review){due_badge}</span></a>
-        <a href="/audio-gym" class="{gym_cls}">{ICON_AUDIO} <span>Audio Gym</span></a>
-        <a href="/data" class="{data_cls}">{ICON_DATA} <span>데이터 백업/가져오기</span></a>
-        <a href="/settings" class="{settings_cls}">{ICON_SETTINGS} <span>설정</span></a>
         <div class="theme-picker" title="테마 선택">
           {ICON_PALETTE}
           <select class="theme-select-input" onchange="window.switchTheme(this.value)" aria-label="테마 선택">
-            <option value="obsidian">🌌 옵시디언</option>
-            <option value="nordic">🌲 노르딕</option>
-            <option value="paper">📜 페이퍼</option>
-            <option value="sunset">☕ 선셋</option>
-            <option value="terminal">📟 터미널</option>
+            <option value="obsidian">옵시디언</option>
+            <option value="nordic">노르딕</option>
+            <option value="paper">페이퍼</option>
+            <option value="sunset">선셋</option>
+            <option value="terminal">터미널</option>
           </select>
         </div>
         <form method="POST" action="/logout" style="display:inline;margin:0;">
-          <button type="submit" title="로그아웃">{ICON_LOGOUT} <span>로그아웃</span></button>
+          <button type="submit" class="navbar-logout-btn" title="로그아웃">{ICON_LOGOUT}<span class="logout-text">로그아웃</span></button>
         </form>
-      </nav>
+      </div>
     </header>"#
     )
 }
@@ -539,7 +541,7 @@ header.navbar {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  padding: 0.85rem 1.25rem;
+  padding: 0.75rem 1.25rem;
   position: sticky;
   top: 0;
   z-index: 100;
@@ -549,6 +551,40 @@ header.navbar {
   border-bottom: 1px solid var(--border);
   margin-bottom: 1.5rem;
   transition: background 0.25s ease, border-color 0.25s ease;
+}
+
+.navbar-brand-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.navbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.navbar-logout-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background: var(--surface-card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.825rem;
+  font-weight: 500;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.navbar-logout-btn:hover {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: var(--danger);
+  color: var(--danger);
+  transform: translateY(-1px);
 }
 
 .brand-logo {
@@ -1146,19 +1182,75 @@ details summary:hover {
   border: 1px solid rgba(0, 0, 0, 0.15);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 860px) {
   header.navbar {
-    flex-direction: column;
-    align-items: stretch;
-    padding: 0.75rem 1rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 0.5rem 0.5rem;
+    padding: 0.55rem 0.85rem;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+  .navbar-brand-wrap {
+    grid-column: 1 / 2;
+    grid-row: 1 / 2;
+  }
+  .navbar-actions {
+    grid-column: 2 / 3;
+    grid-row: 1 / 2;
+    justify-content: flex-end;
+    gap: 0.35rem;
   }
   .nav-links {
-    justify-content: flex-start;
+    grid-column: 1 / 3;
+    grid-row: 2 / 3;
+    width: 100%;
+    display: flex;
     overflow-x: auto;
-    padding-bottom: 0.25rem;
+    white-space: nowrap;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.35rem;
+    padding: 2px 0 2px;
+  }
+  .nav-links::-webkit-scrollbar {
+    display: none;
+  }
+  .nav-links a {
+    flex-shrink: 0;
+    padding: 0.42rem 0.65rem;
+    font-size: 0.825rem;
+  }
+  .nav-label-long {
+    display: none;
+  }
+  .logout-text {
+    display: none;
+  }
+  .navbar-logout-btn {
+    padding: 0.35rem 0.45rem;
+  }
+  .brand-logo {
+    font-size: 1.05rem;
+  }
+  .brand-logo svg {
+    width: 22px;
+    height: 22px;
+  }
+  .brand-badge {
+    display: none;
+  }
+  .voice-picker, .theme-picker {
+    padding: 0.32rem 0.45rem;
+    font-size: 0.78rem;
+  }
+  .voice-select-input, .theme-select-input {
+    font-size: 0.78rem !important;
   }
   .container {
-    padding: 0.75rem 1rem 2rem;
+    padding: 0.65rem 0.85rem 2rem;
   }
   .theme-cards-grid {
     grid-template-columns: 1fr;

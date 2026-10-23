@@ -389,19 +389,30 @@ pub async fn audio_gym_page(
         .gym-chunk {{ font-size: 1.6rem; font-weight: 700; color: var(--primary-light); margin-bottom: 0.5rem; min-height: 2.25rem; letter-spacing: -0.01em; }}
         .gym-sentence {{ font-size: 1.15rem; color: #cbd5e1; line-height: 1.6; min-height: 3rem; }}
         .gym-timer {{ font-size: 3.75rem; font-weight: 800; color: var(--accent); margin: 1rem 0; font-variant-numeric: tabular-nums; text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }}
-        .gym-controls {{ display: flex; gap: 0.75rem; justify-content: center; align-items: center; margin-bottom: 1.5rem; }}
-        .gym-btn {{ padding: 0.75rem 1.6rem; border-radius: var(--radius-sm); font-size: 1rem; font-weight: 700; cursor: pointer; border: 1px solid var(--border); transition: all 0.18s; }}
-        .gym-btn-primary {{ background: linear-gradient(135deg, #2563eb, #1d4ed8); border-color: #3b82f6; color: white; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); }}
+        .gym-controls {{ display: flex; gap: 0.5rem; justify-content: center; align-items: center; margin-bottom: 1.5rem; width: 100%; max-width: 440px; margin-left: auto; margin-right: auto; }}
+        .gym-btn {{ white-space: nowrap; border-radius: var(--radius-sm); font-size: 0.95rem; font-weight: 700; cursor: pointer; border: 1px solid var(--border); transition: all 0.18s; text-align: center; box-sizing: border-box; }}
+        .gym-btn-primary {{ background: linear-gradient(135deg, #2563eb, #1d4ed8); border-color: #3b82f6; color: white; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); flex: 1.35; padding: 0.75rem 0.6rem; }}
         .gym-btn-primary:hover {{ background: linear-gradient(135deg, #3b82f6, #2563eb); transform: translateY(-1px); }}
-        .gym-btn-secondary {{ background: var(--surface-card); color: var(--text); }}
+        .gym-btn-secondary {{ background: var(--surface-card); color: var(--text); flex: 1; padding: 0.75rem 0.4rem; }}
         .gym-btn-secondary:hover {{ background: var(--surface-hover); transform: translateY(-1px); }}
-        .gym-config {{ display: flex; gap: 1rem; justify-content: center; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; font-size: 0.875rem; }}
+        .gym-config {{ display: flex; gap: 0.75rem 1rem; justify-content: center; align-items: center; flex-wrap: wrap; margin-bottom: 1.5rem; font-size: 0.875rem; }}
+        .gym-config select, .gym-config input {{ background: var(--surface-card); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.3rem 0.5rem; }}
         .sound-wave {{ display: inline-flex; align-items: center; gap: 2px; height: 14px; vertical-align: middle; }}
         .sound-wave span {{ display: block; width: 3px; height: 100%; background: currentColor; border-radius: 2px; animation: gym-wave 0.9s infinite ease-in-out; }}
         .sound-wave span:nth-child(1) {{ animation-delay: -0.4s; }}
         .sound-wave span:nth-child(2) {{ animation-delay: -0.2s; }}
         .sound-wave span:nth-child(3) {{ animation-delay: 0s; }}
         @keyframes gym-wave {{ 0%, 40%, 100% {{ transform: scaleY(0.25); }} 20% {{ transform: scaleY(1); }} }}
+        @media (max-width: 600px) {{
+            .gym-stage {{ padding: 1.5rem 1rem; margin-bottom: 1rem; }}
+            .gym-korean {{ font-size: 1.1rem; min-height: 1.6rem; margin-bottom: 0.75rem; }}
+            .gym-chunk {{ font-size: 1.35rem; min-height: 1.8rem; word-break: break-word; }}
+            .gym-sentence {{ font-size: 1rem; min-height: 2.4rem; word-break: break-word; }}
+            .gym-timer {{ font-size: 2.8rem; margin: 0.6rem 0; }}
+            .gym-config {{ gap: 0.5rem 0.6rem; font-size: 0.825rem; margin-bottom: 1rem; }}
+            .gym-config select, .gym-config input {{ padding: 0.25rem 0.4rem; font-size: 0.825rem; }}
+            .gym-btn {{ font-size: 0.875rem; }}
+        }}
     </style>
 </head>
 <body>
