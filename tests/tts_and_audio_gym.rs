@@ -270,3 +270,52 @@ async fn audio_gym_page_and_playlist_api_filters_cards() {
     assert_eq!(tag_items.len(), 1);
     assert_eq!(tag_items[0].chunk, "hit the ground running");
 }
+
+#[tokio::test]
+async fn home_page_renders_voice_gender_picker_and_card_tts_speaker_buttons() {
+    let fake_tts = Arc::new(FakeTtsProvider::default());
+    let (app, cookie, pool) = test_app_with_tts(fake_tts.clone()).await;
+
+    // Create a card
+    cards::insert_study_card(
+        &pool,
+        &CreateStudyCardInput {
+            chunk: "would you mind if I".to_string(),
+            surface_chunk: "Would you mind if I".to_string(),
+            context_sentence: "Would you mind if I left a bit early today?".to_string(),
+            korean_meaning: "제가 오늘 조금 일찍 가도 될까요?".to_string(),
+            extra_examples: vec![],
+            nuance_note: String::new(),
+            tags: vec!["polite".to_string()],
+            source_type: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html = String::from_utf8_lossy(&res.into_body().collect().await.unwrap().to_bytes()).to_string();
+
+    // 1. Navbar contains voice picker with female and male options
+    assert!(html.contains("voice-picker"));
+    assert!(html.contains("voice-select-input"));
+    assert!(html.contains("switchVoiceGender"));
+    assert!(html.contains("여성 음성"));
+    assert!(html.contains("남성 음성"));
+
+    // 2. Study Card contains the TTS speaker button next to the context sentence
+    assert!(html.contains("context-sentence-wrap"));
+    assert!(html.contains("btn-tts-speaker"));
+    assert!(html.contains("playSentenceAudio"));
+    assert!(html.contains("Would you mind if I left a bit early today?"));
+}

@@ -60,6 +60,106 @@ pub const HEAD_META: &str = r##"<meta charset="UTF-8">
       } catch (e) {}
     }
     window.switchTheme = switchTheme;
+
+    function getPreferredVoiceGender() {
+      try {
+        return localStorage.getItem('my_english_voice_gender') || 'female';
+      } catch (e) {
+        return 'female';
+      }
+    }
+    function switchVoiceGender(g) {
+      try {
+        localStorage.setItem('my_english_voice_gender', g);
+        var sels = document.querySelectorAll('.voice-select-input');
+        sels.forEach(function(s) { s.value = g; });
+        var gymSel = document.getElementById('genderSelect');
+        if (gymSel) gymSel.value = g;
+      } catch (e) {}
+    }
+    window.getPreferredVoiceGender = getPreferredVoiceGender;
+    window.switchVoiceGender = switchVoiceGender;
+
+    window.playSentenceAudio = function(btn, text) {
+      if (!text || !text.trim()) return;
+      var clean = text.trim();
+      var gender = getPreferredVoiceGender();
+      var origHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.classList.add('playing');
+        btn.setAttribute('data-orig-html', origHtml);
+        btn.innerHTML = '<span class="audio-spinner"></span> <span>재생중...</span>';
+      }
+
+      var done = false;
+      var finish = function() {
+        if (!done) {
+          done = true;
+          if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('playing');
+            btn.innerHTML = btn.getAttribute('data-orig-html') || origHtml;
+          }
+        }
+      };
+
+      var timer = setTimeout(finish, 8000);
+
+      var fallbackSpeech = function() {
+        clearTimeout(timer);
+        if ('speechSynthesis' in window) {
+          try {
+            window.speechSynthesis.cancel();
+            var u = new SpeechSynthesisUtterance(clean);
+            u.lang = 'en-US';
+            u.rate = 0.95;
+            if (gender === 'male') {
+              var voices = window.speechSynthesis.getVoices();
+              var maleVoice = voices.find(function(v) {
+                return v.lang.startsWith('en') && (v.name.includes('Male') || v.name.includes('David') || v.name.includes('Guy') || v.name.includes('Matthew'));
+              });
+              if (maleVoice) u.voice = maleVoice;
+            }
+            u.onend = finish;
+            u.onerror = finish;
+            window.speechSynthesis.speak(u);
+          } catch (e) {
+            finish();
+          }
+        } else {
+          finish();
+        }
+      };
+
+      try {
+        if (!window._globalAudioPlayer) {
+          window._globalAudioPlayer = new Audio();
+        }
+        var audio = window._globalAudioPlayer;
+        audio.pause();
+        audio.onended = function() {
+          clearTimeout(timer);
+          finish();
+        };
+        audio.onerror = function() {
+          clearTimeout(timer);
+          fallbackSpeech();
+        };
+
+        audio.src = '/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=' + encodeURIComponent(gender);
+        var p = audio.play();
+        if (p !== undefined) {
+          p.catch(function(err) {
+            console.warn('Audio play failed, falling back to Web Speech:', err);
+            fallbackSpeech();
+          });
+        }
+      } catch (err) {
+        fallbackSpeech();
+      }
+    };
+
     document.addEventListener('DOMContentLoaded', function() {
       try {
         var t = document.documentElement.getAttribute('data-theme') || 'obsidian';
@@ -73,6 +173,12 @@ pub const HEAD_META: &str = r##"<meta charset="UTF-8">
             c.classList.remove('active');
           }
         });
+
+        var g = getPreferredVoiceGender();
+        var vSels = document.querySelectorAll('.voice-select-input');
+        vSels.forEach(function(s) { s.value = g; });
+        var gymSel = document.getElementById('genderSelect');
+        if (gymSel) gymSel.value = g;
       } catch (e) {}
     });
   </script>"##;
@@ -140,11 +246,20 @@ pub fn render_navbar(active: &str, due_count: Option<i64>) -> String {
 
     format!(
         r#"<header class="navbar">
-      <a href="/" class="brand-logo">
-        {ICON_LOGO}
-        <span>My English</span>
-        <span class="brand-badge">Chunk &amp; SRS</span>
-      </a>
+      <div class="navbar-left">
+        <a href="/" class="brand-logo">
+          {ICON_LOGO}
+          <span>My English</span>
+          <span class="brand-badge">Chunk &amp; SRS</span>
+        </a>
+        <div class="voice-picker" title="TTS 음성(보이스) 선택">
+          <span class="voice-picker-icon">🎙️</span>
+          <select class="voice-select-input" onchange="window.switchVoiceGender(this.value)" aria-label="TTS 음성 선택">
+            <option value="female">👩 여성 음성</option>
+            <option value="male">👨 남성 음성</option>
+          </select>
+        </div>
+      </div>
       <nav class="nav-links">
         <a href="/" class="{home_cls}">{ICON_HOME} <span>홈 (Home)</span></a>
         <a href="/review" class="{review_cls}">{ICON_REVIEW} <span>복습 (Review){due_badge}</span></a>
@@ -531,6 +646,145 @@ header.navbar {
   width: auto !important;
   outline: none !important;
   box-shadow: none !important;
+}
+
+.navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* Voice Gender Selector in Navbar */
+.voice-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  padding: 0.38rem 0.65rem;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.825rem;
+  transition: all 0.18s ease;
+}
+
+.voice-picker:hover {
+  border-color: var(--border-hover);
+  color: var(--text);
+}
+
+.voice-picker-icon {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.voice-select-input {
+  background: transparent !important;
+  border: none !important;
+  color: var(--text) !important;
+  font-size: 0.825rem !important;
+  font-weight: 500 !important;
+  cursor: pointer;
+  padding: 0 !important;
+  margin: 0 !important;
+  width: auto !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.voice-select-input option {
+  background: var(--surface-card) !important;
+  color: var(--text) !important;
+}
+
+/* Context Sentence & TTS Play Button in Study Card */
+.context-sentence-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+  margin-bottom: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.context-sentence-wrap .context-sentence {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.45;
+}
+
+.btn-tts-speaker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  color: var(--primary-light);
+  padding: 0.28rem 0.65rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.825rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.btn-tts-speaker:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-accent);
+  color: var(--text-hover);
+  transform: translateY(-1px);
+}
+
+.btn-tts-speaker:active {
+  transform: translateY(0);
+}
+
+.btn-tts-speaker.playing {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.btn-tts-speaker-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+  transition: all 0.15s ease;
+}
+
+.btn-tts-speaker-sm:hover {
+  border-color: var(--border-accent);
+  color: var(--primary-light);
+}
+
+@keyframes tts-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.audio-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: tts-spin 0.6s linear infinite;
+  vertical-align: middle;
 }
 
 /* Badges & Counters */
@@ -1002,8 +1256,9 @@ pub fn render_dashboard(
             if !card.extra_examples.is_empty() {
                 examples_html.push_str("<ul class=\"extra-examples\">");
                 for ex in &card.extra_examples {
+                    let ex_enc = urlencoding::encode(&ex.english);
                     examples_html.push_str(&format!(
-                        "<li><strong>{}</strong> — {}</li>",
+                        r#"<li><strong>{}</strong> <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, decodeURIComponent('{ex_enc}'))" title="예문 발음 듣기">🔊</button> — {}</li>"#,
                         escape_html(&ex.english),
                         escape_html(&ex.korean)
                     ));
@@ -1033,6 +1288,7 @@ pub fn render_dashboard(
                 .collect::<Vec<_>>()
                 .join("\n");
             let tags_text = card.tags.join(", ");
+            let context_sentence_enc = urlencoding::encode(&card.context_sentence);
 
             cards_html.push_str(&format!(
                 r#"<article class="study-card" data-card-id="{id}">
@@ -1043,7 +1299,13 @@ pub fn render_dashboard(
     </div>
     <span class="stage-badge" data-stage="{srs_stage}">SRS Stage {srs_stage}</span>
   </div>
-  <p class="context-sentence">{context_sentence}</p>
+  <div class="context-sentence-wrap">
+    <p class="context-sentence">{context_sentence}</p>
+    <button type="button" class="btn-tts-speaker" onclick="window.playSentenceAudio(this, decodeURIComponent('{context_sentence_enc}'))" title="문장 발음 듣기" aria-label="문장 발음 듣기">
+      {ICON_SPEAKER}
+      <span>듣기</span>
+    </button>
+  </div>
   <p class="korean-meaning">{korean_meaning}</p>
   {examples_html}
   {nuance_html}
@@ -1079,6 +1341,7 @@ pub fn render_dashboard(
                 surface_chunk = escape_html(&card.surface_chunk),
                 srs_stage = card.srs_stage,
                 context_sentence = escape_html(&card.context_sentence),
+                context_sentence_enc = context_sentence_enc,
                 korean_meaning = escape_html(&card.korean_meaning),
                 nuance_note = escape_html(&card.nuance_note),
                 extra_examples_text = escape_html(&extra_examples_text),

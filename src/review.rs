@@ -940,12 +940,15 @@ pub fn render_review_card_page(
     }}
 
     function prefetchReviewAudio(text) {{
-      if (!text || !text.trim() || reviewBlobCache.has(text.trim())) return;
-      fetch('/api/tts?text=' + encodeURIComponent(text.trim()) + '&lang=en&gender=female')
+      if (!text || !text.trim()) return;
+      const gender = (window.getPreferredVoiceGender ? window.getPreferredVoiceGender() : 'female');
+      const key = gender + ':' + text.trim();
+      if (reviewBlobCache.has(key)) return;
+      fetch('/api/tts?text=' + encodeURIComponent(text.trim()) + '&lang=en&gender=' + encodeURIComponent(gender))
         .then(res => res.ok ? res.blob() : null)
         .then(blob => {{
           if (blob && blob.size > 0) {{
-            reviewBlobCache.set(text.trim(), URL.createObjectURL(blob));
+            reviewBlobCache.set(key, URL.createObjectURL(blob));
           }}
         }})
         .catch(() => {{}});
@@ -1003,8 +1006,10 @@ pub fn render_review_card_page(
           fallbackBrowser();
         }};
 
-        const cachedUrl = reviewBlobCache.get(clean);
-        audio.src = cachedUrl || ('/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=female');
+        const gender = (window.getPreferredVoiceGender ? window.getPreferredVoiceGender() : 'female');
+        const key = gender + ':' + clean;
+        const cachedUrl = reviewBlobCache.get(key);
+        audio.src = cachedUrl || ('/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=' + encodeURIComponent(gender));
         if (!cachedUrl) {{
           prefetchReviewAudio(clean);
         }}
