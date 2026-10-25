@@ -18,34 +18,19 @@ pub fn escape_html(input: &str) -> String {
 pub const FAVICON_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <defs>
     <linearGradient id="fav-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#111d38"/>
-      <stop offset="100%" stop-color="#070c18"/>
-    </linearGradient>
-    <linearGradient id="fav-border" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.7"/>
-      <stop offset="40%" stop-color="#2563eb" stop-opacity="0.3"/>
-      <stop offset="100%" stop-color="#1e293b" stop-opacity="0.1"/>
-    </linearGradient>
-    <linearGradient id="fav-t" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="0%" stop-color="#3b82f6"/>
       <stop offset="100%" stop-color="#1d4ed8"/>
     </linearGradient>
-    <linearGradient id="fav-m" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="100%" stop-color="#0e7490"/>
-    </linearGradient>
-    <linearGradient id="fav-b" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#047857"/>
+    <linearGradient id="fav-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.08"/>
     </linearGradient>
   </defs>
   <rect width="32" height="32" rx="9" fill="url(#fav-bg)"/>
   <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="8.25" stroke="url(#fav-border)" stroke-width="1.5"/>
-  <rect x="7" y="7" width="4.5" height="18" rx="2.25" fill="#38bdf8"/>
-  <rect x="9" y="7" width="16" height="4.5" rx="2.25" fill="url(#fav-t)"/>
-  <rect x="9" y="13.75" width="11.5" height="4.5" rx="2.25" fill="url(#fav-m)"/>
-  <rect x="9" y="20.5" width="14.5" height="4.5" rx="2.25" fill="url(#fav-b)"/>
-  <circle cx="21.5" cy="22.75" r="1" fill="#ecfdf5"/>
+  <rect x="8.5" y="11.5" width="3.5" height="9" rx="1.75" fill="#ffffff" fill-opacity="0.88"/>
+  <rect x="14.25" y="7.5" width="3.5" height="17" rx="1.75" fill="#ffffff"/>
+  <rect x="20" y="10.5" width="3.5" height="11" rx="1.75" fill="#ffffff" fill-opacity="0.92"/>
 </svg>"##;
 
 pub const HEAD_META: &str = r##"<meta charset="UTF-8">
@@ -225,71 +210,37 @@ pub fn render_pwa_manifest() -> &'static str {
 pub const ICON_LOGO: &str = r##"<svg width="24" height="24" viewBox="0 0 32 32" fill="none" style="flex-shrink:0;">
   <defs>
     <linearGradient id="nl-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#111d38"/>
-      <stop offset="100%" stop-color="#070c18"/>
-    </linearGradient>
-    <linearGradient id="nl-border" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.7"/>
-      <stop offset="40%" stop-color="#2563eb" stop-opacity="0.3"/>
-      <stop offset="100%" stop-color="#1e293b" stop-opacity="0.1"/>
-    </linearGradient>
-    <linearGradient id="nl-t" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="0%" stop-color="#3b82f6"/>
       <stop offset="100%" stop-color="#1d4ed8"/>
     </linearGradient>
-    <linearGradient id="nl-m" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="100%" stop-color="#0e7490"/>
-    </linearGradient>
-    <linearGradient id="nl-b" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#047857"/>
+    <linearGradient id="nl-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.08"/>
     </linearGradient>
   </defs>
   <rect width="32" height="32" rx="9" fill="url(#nl-bg)"/>
   <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="8.25" stroke="url(#nl-border)" stroke-width="1.5"/>
-  <rect x="7" y="7" width="4.5" height="18" rx="2.25" fill="#38bdf8"/>
-  <rect x="9" y="7" width="16" height="4.5" rx="2.25" fill="url(#nl-t)"/>
-  <rect x="9" y="13.75" width="11.5" height="4.5" rx="2.25" fill="url(#nl-m)"/>
-  <rect x="9" y="20.5" width="14.5" height="4.5" rx="2.25" fill="url(#nl-b)"/>
-  <circle cx="21.5" cy="22.75" r="1" fill="#ecfdf5"/>
+  <rect x="8.5" y="11.5" width="3.5" height="9" rx="1.75" fill="#ffffff" fill-opacity="0.88"/>
+  <rect x="14.25" y="7.5" width="3.5" height="17" rx="1.75" fill="#ffffff"/>
+  <rect x="20" y="10.5" width="3.5" height="11" rx="1.75" fill="#ffffff" fill-opacity="0.92"/>
 </svg>"##;
 
-pub const ICON_LOGO_LARGE: &str = r##"<svg width="52" height="52" viewBox="0 0 32 32" fill="none" style="flex-shrink:0;">
+pub const ICON_LOGO_LARGE: &str = r##"<svg width="56" height="56" viewBox="0 0 32 32" fill="none" style="flex-shrink:0; filter: drop-shadow(0 10px 25px rgba(37, 99, 235, 0.45));">
   <defs>
     <linearGradient id="nll-bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#111d38"/>
-      <stop offset="100%" stop-color="#070c18"/>
-    </linearGradient>
-    <linearGradient id="nll-border" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8"/>
-      <stop offset="40%" stop-color="#2563eb" stop-opacity="0.35"/>
-      <stop offset="100%" stop-color="#1e293b" stop-opacity="0.1"/>
-    </linearGradient>
-    <linearGradient id="nll-t" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="0%" stop-color="#3b82f6"/>
       <stop offset="100%" stop-color="#1d4ed8"/>
     </linearGradient>
-    <linearGradient id="nll-m" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#06b6d4"/>
-      <stop offset="100%" stop-color="#0e7490"/>
+    <linearGradient id="nll-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.1"/>
     </linearGradient>
-    <linearGradient id="nll-b" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#10b981"/>
-      <stop offset="100%" stop-color="#047857"/>
-    </linearGradient>
-    <filter id="nll-glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3" result="blur"/>
-      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
-    </filter>
   </defs>
   <rect width="32" height="32" rx="9" fill="url(#nll-bg)"/>
   <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="8.25" stroke="url(#nll-border)" stroke-width="1.5"/>
-  <rect x="7" y="7" width="4.5" height="18" rx="2.25" fill="#38bdf8"/>
-  <rect x="9" y="7" width="16" height="4.5" rx="2.25" fill="url(#nll-t)"/>
-  <rect x="9" y="13.75" width="11.5" height="4.5" rx="2.25" fill="url(#nll-m)"/>
-  <rect x="9" y="20.5" width="14.5" height="4.5" rx="2.25" fill="url(#nll-b)"/>
-  <circle cx="21.5" cy="22.75" r="1" fill="#ecfdf5"/>
+  <rect x="8.5" y="11.5" width="3.5" height="9" rx="1.75" fill="#ffffff" fill-opacity="0.88"/>
+  <rect x="14.25" y="7.5" width="3.5" height="17" rx="1.75" fill="#ffffff"/>
+  <rect x="20" y="10.5" width="3.5" height="11" rx="1.75" fill="#ffffff" fill-opacity="0.92"/>
 </svg>"##;
 
 pub const ICON_HOME: &str = r##"<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>"##;
