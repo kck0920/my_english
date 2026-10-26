@@ -212,7 +212,17 @@ pub async fn tts_proxy_handler(
     Query(query): Query<TtsQuery>,
 ) -> Response {
     let text = match query.text {
-        Some(ref t) if !t.trim().is_empty() => t.trim(),
+        Some(ref t) if !t.trim().is_empty() => {
+            let clean = t.trim();
+            if clean.chars().count() > 500 {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "text parameter exceeds 500 characters limit",
+                )
+                    .into_response();
+            }
+            clean
+        }
         _ => return (StatusCode::BAD_REQUEST, "text parameter is required").into_response(),
     };
 
@@ -1051,8 +1061,9 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/audio-gym", get(audio_gym_page))
         .route("/api/audio-gym/playlist", get(audio_gym_playlist_api))
+        .route("/api/tts", get(tts_proxy_handler))
 }
 
 pub fn public_routes() -> Router<AppState> {
-    Router::new().route("/api/tts", get(tts_proxy_handler))
+    Router::new()
 }

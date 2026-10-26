@@ -938,9 +938,27 @@ async fn export_sqlite_bytes(pool: &SqlitePool) -> Result<Vec<u8>> {
     let vacuum_sql = format!("VACUUM INTO '{escaped_path}'");
 
     if sqlx::query(&vacuum_sql).execute(pool).await.is_ok() {
+        // Sanitize sensitive API keys, OAuth tokens, and passcodes from backup
+        let dst_url = format!("sqlite://{}", tmp_path.display());
+        if let Ok(clean_pool) = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect(&dst_url)
+            .await
+        {
+            let _ = sqlx::query("DELETE FROM app_settings")
+                .execute(&clean_pool)
+                .await;
+            let _ = sqlx::raw_sql("PRAGMA wal_checkpoint(TRUNCATE);")
+                .execute(&clean_pool)
+                .await;
+            let _ = sqlx::raw_sql("VACUUM;").execute(&clean_pool).await;
+            clean_pool.close().await;
+        }
+
         if let Ok(bytes) = tokio::fs::read(&tmp_path).await {
             if bytes.starts_with(b"SQLite format 3\0") {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
+                let _ = tokio::fs::remove_file(format!("{}-wal", tmp_path.display())).await;
+                let _ = tokio::fs::remove_file(format!("{}-shm", tmp_path.display())).await;
                 return Ok(bytes);
             }
         }

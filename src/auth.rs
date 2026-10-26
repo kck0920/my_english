@@ -78,7 +78,7 @@ async fn login_submit(
     if is_valid {
         let token = sign_session_token("authenticated", &state.cookie_secret);
         let cookie = format!(
-            "{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_MAX_AGE_SECS}"
+            "{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age={SESSION_MAX_AGE_SECS}"
         );
         (
             StatusCode::SEE_OTHER,
@@ -99,7 +99,7 @@ async fn login_submit(
 
 async fn logout_submit() -> Response {
     let clear_cookie =
-        format!("{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+        format!("{SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0");
     (
         StatusCode::SEE_OTHER,
         [

@@ -160,6 +160,7 @@ async fn tts_proxy_serves_audio_mpeg_and_caches_identical_requests_in_memory() {
 
     // 5. Empty text -> 400
     let res_empty = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/tts?text=%20%20&lang=en")
@@ -170,6 +171,33 @@ async fn tts_proxy_serves_audio_mpeg_and_caches_identical_requests_in_memory() {
         .await
         .unwrap();
     assert_eq!(res_empty.status(), StatusCode::BAD_REQUEST);
+
+    // 6. Unauthenticated request to /api/tts is blocked by require_auth
+    let res_unauth = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/tts?text=hello&lang=en")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_unauth.status(), StatusCode::SEE_OTHER);
+
+    // 7. Text exceeding 500 characters -> 400 Bad Request
+    let long_text = "a".repeat(501);
+    let res_too_long = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/tts?text={long_text}&lang=en"))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_too_long.status(), StatusCode::BAD_REQUEST);
     assert_eq!(fake_tts.recorded_calls().len(), 3);
 }
 

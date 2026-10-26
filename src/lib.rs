@@ -26,7 +26,6 @@ pub fn build_app(state: AppState) -> Router {
 
     Router::new()
         .merge(auth::public_routes())
-        .merge(tts::public_routes())
         .merge(protected)
         .with_state(state)
 }

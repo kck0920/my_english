@@ -1487,7 +1487,7 @@ pub fn render_login_page(error: Option<&str>) -> String {
       {error_html}
       <form method="POST" action="/login" style="text-align: left;">
         <label for="passcode">Passcode</label>
-        <input type="password" id="passcode" name="passcode" required autofocus placeholder="패스코드 (기본값: 1234)">
+        <input type="password" id="passcode" name="passcode" required autofocus placeholder="패스코드를 입력하세요">
         <button type="submit" class="btn btn-primary" style="width:100%; margin-top: 0.5rem; padding: 0.7rem;">로그인</button>
       </form>
     </section>
