@@ -490,6 +490,37 @@ pub fn detect_surface_chunk(
                 }
             }
         }
+
+        // 3. Subsequence match with 1~2 inserted words (e.g., question subject inversion:
+        //    "would like me to" -> "Would you like me to",
+        //    "turn on" -> "Turn it on",
+        //    "take off" -> "Take your shoes off")
+        for extra in 1..=2 {
+            let win_len = n + extra;
+            if sentence_words.len() >= win_len {
+                for window in sentence_words.windows(win_len) {
+                    if let (Some(first_w), Some(last_w)) = (window.first(), window.last()) {
+                        if tokens_match_inflected(chunk_tokens[0], &first_w.1)
+                            && tokens_match_inflected(chunk_tokens[n - 1], &last_w.1)
+                        {
+                            let mut c_idx = 0;
+                            for (_, w_clean) in window.iter() {
+                                if c_idx < n && tokens_match_inflected(chunk_tokens[c_idx], w_clean) {
+                                    c_idx += 1;
+                                }
+                            }
+                            if c_idx == n {
+                                let start = first_w.0.0;
+                                let end = last_w.0.1;
+                                if let Some(slice) = context_sentence.get(start..end) {
+                                    return slice.to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     } else if chunk_tokens.len() == 1 {
         let sentence_words = tokenize_with_spans(context_sentence);
         for ((start, end), w_clean) in sentence_words {
@@ -658,6 +689,16 @@ mod tests {
             ),
             "are supposed to"
         );
+
+        // Subsequence match with inserted subject in questions
+        assert_eq!(
+            detect_surface_chunk(
+                "would like me to",
+                None,
+                "Would you like me to help you with those heavy bags?"
+            ),
+            "Would you like me to"
+        );
     }
 
     #[test]
@@ -686,6 +727,19 @@ mod tests {
         );
         assert_eq!(fallback_prompt.word_count, 6);
         assert_eq!(fallback_prompt.target_surface, "At the end of the day");
+
+        // Question subject inversion masks the full phrase at the beginning
+        let question_prompt = mask_context_sentence(
+            "Would you like me to help you with those heavy bags?",
+            "would like me to",
+            "would like me to",
+        );
+        assert_eq!(
+            question_prompt.masked_sentence,
+            "[ _______________ ] help you with those heavy bags?"
+        );
+        assert_eq!(question_prompt.word_count, 5);
+        assert_eq!(question_prompt.target_surface, "Would you like me to");
     }
 
     #[test]
