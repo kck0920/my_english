@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-/home/ubuntu/my_english}"
 DOMAIN="english-note.duckdns.org"
+PORT="${PORT:-8081}"
 
 echo "==> Building release binary in ${APP_DIR}..."
 cd "${APP_DIR}"
@@ -23,6 +24,6 @@ if command -v nginx >/dev/null 2>&1; then
 fi
 
 echo "==> Checking health endpoint..."
-curl -fsS http://127.0.0.1:3000/health
+curl -fsS "http://127.0.0.1:${PORT}/health"
 echo ""
 echo "==> Deployment complete for https://${DOMAIN}"
