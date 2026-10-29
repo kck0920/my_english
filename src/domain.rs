@@ -110,17 +110,29 @@ impl AnswerMatch {
 /// Normalizes case, whitespace, punctuation, and contractions, comparing `user_input`
 /// against `surface_chunk` (`ExactSurface`) and `chunk` (`CanonicalBase`).
 pub fn check_review_answer(user_input: &str, chunk: &str, surface_chunk: &str) -> AnswerMatch {
+    check_review_answer_candidates(user_input, chunk, &[surface_chunk])
+}
+
+/// Normalizes case, whitespace, punctuation, and contractions, comparing `user_input`
+/// against multiple `surface_candidates` (`ExactSurface`) and `chunk` (`CanonicalBase`).
+pub fn check_review_answer_candidates(
+    user_input: &str,
+    chunk: &str,
+    surface_candidates: &[&str],
+) -> AnswerMatch {
     let input_norm = normalize_answer_tokens(user_input, false);
     if input_norm.is_empty() {
         return AnswerMatch::Mismatch;
     }
     let input_expanded = normalize_answer_tokens(user_input, true);
 
-    let surface_norm = normalize_answer_tokens(surface_chunk, false);
-    if !surface_norm.is_empty() {
-        let surface_expanded = normalize_answer_tokens(surface_chunk, true);
-        if input_norm == surface_norm || input_expanded == surface_expanded {
-            return AnswerMatch::ExactSurface;
+    for &surface in surface_candidates {
+        let surface_norm = normalize_answer_tokens(surface, false);
+        if !surface_norm.is_empty() {
+            let surface_expanded = normalize_answer_tokens(surface, true);
+            if input_norm == surface_norm || input_expanded == surface_expanded {
+                return AnswerMatch::ExactSurface;
+            }
         }
     }
 
@@ -136,7 +148,7 @@ pub fn check_review_answer(user_input: &str, chunk: &str, surface_chunk: &str) -
 }
 
 fn normalize_answer_tokens(raw: &str, expand_contractions: bool) -> String {
-    let unified = raw.replace(['’', '‘', '`'], "'");
+    let unified = raw.replace(['’', '‘', '`', 'ʼ', '′', '´', 'ʻ', 'ʹ'], "'");
     let mut cleaned = String::with_capacity(unified.len());
     for ch in unified.chars() {
         if ch.is_alphanumeric() || ch == '\'' || ch.is_whitespace() {
@@ -453,10 +465,26 @@ pub fn detect_surface_chunk(
     if let Some(explicit) = surface_chunk_input {
         let explicit_trimmed = explicit.trim();
         if !explicit_trimmed.is_empty() {
-            return explicit_trimmed.to_string();
+            // Check if explicit actually appears in context_sentence (case-insensitive)
+            let sentence_lower = context_sentence.to_lowercase();
+            let explicit_lower = explicit_trimmed.to_lowercase();
+            if let Some(byte_idx) = sentence_lower.find(&explicit_lower) {
+                if let Some(slice) = context_sentence.get(byte_idx..byte_idx + explicit_trimmed.len()) {
+                    return slice.to_string();
+                }
+                return explicit_trimmed.to_string();
+            }
+            // Explicit is not found in context_sentence (e.g. caller passed canonical base chunk).
+            // Try auto-detection from context_sentence before falling back to explicit!
         }
     }
     if chunk_trimmed.is_empty() {
+        if let Some(explicit) = surface_chunk_input {
+            let explicit_trimmed = explicit.trim();
+            if !explicit_trimmed.is_empty() {
+                return explicit_trimmed.to_string();
+            }
+        }
         return String::new();
     }
 
@@ -532,6 +560,12 @@ pub fn detect_surface_chunk(
         }
     }
 
+    if let Some(explicit) = surface_chunk_input {
+        let explicit_trimmed = explicit.trim();
+        if !explicit_trimmed.is_empty() {
+            return explicit_trimmed.to_string();
+        }
+    }
     chunk_trimmed.to_string()
 }
 
@@ -699,6 +733,16 @@ mod tests {
             ),
             "Would you like me to"
         );
+
+        // Fallback to detected inflected surface form when explicit surface chunk is erroneously canonical form
+        assert_eq!(
+            detect_surface_chunk(
+                "feel like",
+                Some("feel like"),
+                "It looks like rain, and it even feels like snow because it is so cold."
+            ),
+            "feels like"
+        );
     }
 
     #[test]
@@ -762,6 +806,24 @@ mod tests {
                 "gets me every time"
             ),
             AnswerMatch::CanonicalBase
+        );
+
+        // Multiple candidates support with check_review_answer_candidates
+        assert_eq!(
+            check_review_answer_candidates(
+                "feels like",
+                "feel like",
+                &["feels like", "feel like"]
+            ),
+            AnswerMatch::ExactSurface
+        );
+        assert_eq!(
+            check_review_answer_candidates(
+                "feels  like",
+                "feel like",
+                &["feels like"]
+            ),
+            AnswerMatch::ExactSurface
         );
 
         // Contractions and apostrophe variations

@@ -358,3 +358,84 @@ async fn srs_stage_rating_requeues_again_today_advances_good_and_easy_and_record
     assert_eq!(arr.len(), 3);
 }
 
+#[tokio::test]
+async fn cloze_review_handles_inflected_surface_when_card_surface_chunk_was_canonical() {
+    let (app, cookie) = test_app_with_cookie().await;
+
+    // Card created with surface_chunk intentionally set to canonical form or empty
+    let card_id = create_card_json(
+        &app,
+        &cookie,
+        serde_json::json!({
+            "chunk": "feel like",
+            "surface_chunk": "feel like", // Even if stored as canonical
+            "context_sentence": "It looks like rain, and it even feels like snow because it is so cold.",
+            "korean_meaning": "마치 ~인 것 같다, ~처럼 느껴지다",
+            "extra_examples": [],
+            "nuance_note": ""
+        }),
+    )
+    .await;
+
+    // 1. User inputs correct inflected form "feels like" -> Exact Surface Match!
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/review/{card_id}/check"))
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("user_input=feels+like"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html =
+        String::from_utf8_lossy(&res.into_body().collect().await.unwrap().to_bytes()).to_string();
+    assert!(
+        html.contains("정답입니다! (Exact Surface Match)"),
+        "Expected Exact Surface Match banner, but got: {html}"
+    );
+    assert!(!html.contains("아쉽습니다 (Mismatch)"));
+
+    // 2. User inputs with multiple spaces "feels   like" -> Also Exact Surface Match!
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/review/{card_id}/check"))
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("user_input=feels+++like"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html2 =
+        String::from_utf8_lossy(&res.into_body().collect().await.unwrap().to_bytes()).to_string();
+    assert!(html2.contains("정답입니다! (Exact Surface Match)"));
+
+    // 3. User inputs canonical chunk "feel like" -> Canonical Base Match!
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(&format!("/review/{card_id}/check"))
+                .header("cookie", &cookie)
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("user_input=feel+like"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let html3 =
+        String::from_utf8_lossy(&res.into_body().collect().await.unwrap().to_bytes()).to_string();
+    assert!(html3.contains("정답 인정! (Canonical Chunk Match)"));
+}
+

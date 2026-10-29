@@ -12,8 +12,8 @@ use sqlx::{Row, SqlitePool};
 
 use crate::cards::{count_due_cards, get_study_card_by_id};
 use crate::domain::{
-    check_review_answer, compute_srs_transition, mask_context_sentence, AnswerMatch, ClozePrompt,
-    ExtraExample, ReviewRating, SrsTransition, StudyCard,
+    check_review_answer_candidates, compute_srs_transition, mask_context_sentence, AnswerMatch,
+    ClozePrompt, ExtraExample, ReviewRating, SrsTransition, StudyCard,
 };
 use crate::state::AppState;
 use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META};
@@ -498,13 +498,23 @@ async fn check_answer_impl(
     };
 
     let cloze = mask_context_sentence(&card.context_sentence, &card.surface_chunk, &card.chunk);
-    let effective_surface = if card.surface_chunk.trim().is_empty() {
-        cloze.target_surface.as_str()
+    let effective_surface = if !cloze.target_surface.trim().is_empty() {
+        cloze.target_surface.clone()
+    } else if !card.surface_chunk.trim().is_empty() {
+        card.surface_chunk.clone()
     } else {
-        card.surface_chunk.as_str()
+        card.chunk.clone()
     };
     let user_text = input.text().trim().to_string();
-    let match_result = check_review_answer(&user_text, &card.chunk, effective_surface);
+    let match_result = check_review_answer_candidates(
+        &user_text,
+        &card.chunk,
+        &[
+            cloze.target_surface.as_str(),
+            card.surface_chunk.as_str(),
+            effective_surface.as_str(),
+        ],
+    );
 
     if wants_json {
         let resp = CheckAnswerResponse {
@@ -513,7 +523,7 @@ async fn check_answer_impl(
             match_result,
             correct: match_result.is_correct(),
             chunk: card.chunk,
-            surface_chunk: effective_surface.to_string(),
+            surface_chunk: effective_surface,
             context_sentence: card.context_sentence,
             korean_meaning: card.korean_meaning,
             extra_examples: card.extra_examples,
@@ -801,14 +811,23 @@ pub fn render_review_card_page(
             escape_html(&card.chunk),
             escape_html(&cloze.target_surface)
         ),
-        Some(AnswerMatch::Mismatch) => format!(
-            r#"<div class="panel" style="border-left: 4px solid var(--danger);">
-  <strong>아쉽습니다 (Mismatch)</strong> — 입력값: <code>{}</code> / 정답: <strong>{}</strong> (원형: <code>{}</code>)
+        Some(AnswerMatch::Mismatch) => {
+            let answer_info = if cloze.target_surface.eq_ignore_ascii_case(&card.chunk) {
+                format!("정답: <strong>{}</strong>", escape_html(&cloze.target_surface))
+            } else {
+                format!(
+                    "정답: <strong>{}</strong> (원형: <code>{}</code>)",
+                    escape_html(&cloze.target_surface),
+                    escape_html(&card.chunk)
+                )
+            };
+            format!(
+                r#"<div class="panel" style="border-left: 4px solid var(--danger);">
+  <strong>아쉽습니다 (Mismatch)</strong> — 입력값: <code>{}</code> / {answer_info}
 </div>"#,
-            escape_html(user_input.unwrap_or("")),
-            escape_html(&cloze.target_surface),
-            escape_html(&card.chunk)
-        ),
+                escape_html(user_input.unwrap_or(""))
+            )
+        }
         None => String::new(),
     };
 
