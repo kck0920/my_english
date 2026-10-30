@@ -1613,8 +1613,8 @@ pub fn render_dashboard(
       <input type="text" name="surface_chunk" value="{surface_chunk}">
       <label>Context Sentence (대표 영어 예문)</label>
       <input type="text" name="context_sentence" value="{context_sentence}" required>
-      <label>한국어 의미</label>
-      <input type="text" name="korean_meaning" value="{korean_meaning}" required>
+      <label>대표 문장 한국어 해석 (Context Sentence 번역)</label>
+      <input type="text" name="korean_meaning" value="{korean_meaning}" required placeholder="예: 떠나기 전에 현관문을 반드시 잠그도록 하세요.">
       <label>추가 예문 (영어 | 한국어, 줄바꿈 구분)</label>
       <textarea name="extra_examples" rows="2">{extra_examples_text}</textarea>
       <label>뉘앙스 / 해설</label>
@@ -1690,7 +1690,7 @@ pub fn render_dashboard(
           <input type="text" name="surface_chunk" placeholder="gets me every time">
           <label>Context Sentence (대표 영어 예문)</label>
           <input type="text" name="context_sentence" required placeholder="That final scene gets me every time.">
-          <label>한국어 의미</label>
+          <label>대표 문장 한국어 해석 (Context Sentence 번역)</label>
           <input type="text" name="korean_meaning" required placeholder="그 마지막 장면은 볼 때마다 나를 울려.">
           <label>추가 응용 예문 (영어 | 한국어, 줄바꿈 구분)</label>
           <textarea name="extra_examples" rows="2" placeholder="His dad jokes get me every time. | 그의 아재 개그는 들을 때마다 웃겨."></textarea>

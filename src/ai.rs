@@ -126,10 +126,22 @@ pub fn draft_cards_json_schema() -> serde_json::Value {
                 "items": {
                     "type": "OBJECT",
                     "properties": {
-                        "chunk": { "type": "STRING" },
-                        "surface_chunk": { "type": "STRING" },
-                        "context_sentence": { "type": "STRING" },
-                        "korean_meaning": { "type": "STRING" },
+                        "chunk": {
+                            "type": "STRING",
+                            "description": "Canonical base form of the chunk (e.g. 'make sure to', 'suffer from burnout')"
+                        },
+                        "surface_chunk": {
+                            "type": "STRING",
+                            "description": "Exact inflected substring appearing inside context_sentence (e.g. 'are suffering from burnout')"
+                        },
+                        "context_sentence": {
+                            "type": "STRING",
+                            "description": "Natural representative English sentence containing surface_chunk"
+                        },
+                        "korean_meaning": {
+                            "type": "STRING",
+                            "description": "Accurate, complete, and natural Korean translation of the ENTIRE context_sentence (NOT just the chunk definition alone). E.g. '떠나기 전에 현관문을 반드시 잠그도록 하세요.'"
+                        },
                         "extra_examples": {
                             "type": "ARRAY",
                             "items": {
@@ -167,14 +179,16 @@ pub fn build_smart_input_prompt(input: &str) -> String {
     format!(
         r#"Analyze the following user input (which may be a Korean question asking how to say something in English, an awkward English draft needing correction, or an English paragraph/article excerpt) and generate 2 to 3 English study Draft Cards focusing on natural native Chunks.
 
-Return ONLY valid JSON array of DraftCard objects with fields:
-- chunk (canonical base form, e.g. "get me every time")
-- surface_chunk (exact substring appearing inside context_sentence, e.g. "gets me every time")
-- context_sentence (natural representative English sentence containing surface_chunk)
-- korean_meaning (clear Korean meaning of the chunk/sentence)
-- extra_examples (array of 1-2 objects with "english" and "korean" fields)
-- nuance_note (Korean explanation of usage nuance or why the user's draft was corrected)
-- tags (array of 1-3 situational tags in lowercase English)
+Return ONLY valid JSON with a "cards" array containing DraftCard objects with fields:
+- chunk: Canonical base form of the chunk (e.g. "make sure to", "suffer from burnout", "get me every time").
+- surface_chunk: Exact substring of the chunk as it appears inflected inside context_sentence (e.g. "make sure to", "are suffering from burnout", "gets me every time").
+- context_sentence: A natural, realistic, representative English sentence containing surface_chunk (e.g. "Please make sure to lock the front door before you leave.").
+- korean_meaning: CRITICAL — Accurate and natural full Korean translation of the ENTIRE context_sentence (e.g. "떠나기 전에 현관문을 반드시 잠그도록 하세요.").
+  * DO NOT provide only the chunk's isolated definition (e.g. NEVER write "~을 확인하다" or "번아웃 증상을 겪다").
+  * The user reviews cards using fill-in-the-blank cloze tests where this full sentence translation is displayed as the primary comprehension prompt.
+- extra_examples: Array of 1-2 practical objects with "english" (natural practical sentence) and "korean" (full Korean translation of that sentence).
+- nuance_note: Helpful Korean explanation describing when/why native speakers use this chunk, its tone, or nuance tips.
+- tags: Array of 1-3 situational tags in lowercase English (e.g. ["daily", "workplace"]).
 
 User input:
 {input}"#
@@ -1298,8 +1312,8 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
     <input type="text" name="surface_chunk" value="{surface_chunk}">
     <label>Context Sentence (대표 영어 예문)</label>
     <input type="text" name="context_sentence" value="{context_sentence}" required>
-    <label>한국어 의미</label>
-    <input type="text" name="korean_meaning" value="{korean_meaning}" required>
+    <label>대표 문장 한국어 해석 (Context Sentence 전체 번역)</label>
+    <input type="text" name="korean_meaning" value="{korean_meaning}" required placeholder="예: 떠나기 전에 현관문을 반드시 잠그도록 하세요.">
     <label>추가 응용 예문 (영어 | 한국어, 줄바꿈 구분)</label>
     <textarea name="extra_examples" rows="2">{extra_examples}</textarea>
     <label>AI 뉘앙스 / 교정 해설</label>
