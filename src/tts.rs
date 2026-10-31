@@ -14,9 +14,9 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::cards::list_study_cards;
-use crate::domain::StudyCard;
+use crate::domain::{ExtraExample, StudyCard};
 use crate::state::AppState;
-use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META, ICON_AUDIO};
+use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META, ICON_AUDIO, ICON_SPEAKER};
 
 /// Global in-memory bounded cache for synthesized TTS MP3 audio bytes.
 /// Key format: "{lang}:{gender}:{trimmed_text}"
@@ -298,6 +298,8 @@ pub struct AudioGymItem {
     pub chunk: String,
     pub context_sentence: String,
     pub korean_meaning: String,
+    #[serde(default)]
+    pub extra_examples: Vec<ExtraExample>,
     pub tags: Vec<String>,
     pub srs_stage: i64,
 }
@@ -348,6 +350,7 @@ pub async fn audio_gym_playlist_api(
             chunk: c.chunk,
             context_sentence: c.context_sentence,
             korean_meaning: c.korean_meaning,
+            extra_examples: c.extra_examples,
             tags: c.tags,
             srs_stage: c.srs_stage,
         })
@@ -463,8 +466,12 @@ pub async fn audio_gym_page(
             <div id="stepIndicator" class="gym-step-indicator">대기 중</div>
             <div id="koreanText" class="gym-korean">재생 버튼을 누르면 시작합니다</div>
             <div id="timerDisplay" class="gym-timer" style="display: none;">3</div>
-            <div id="chunkText" class="gym-chunk" style="display: none;"></div>
-            <div id="sentenceText" class="gym-sentence" style="display: none;"></div>
+            <div id="chunkText" class="gym-chunk tts-clickable-text" style="display: none;" onclick="if(this.innerText) window.playSentenceAudio(null, this.innerText)" title="클릭하여 Chunk 발음 다시 듣기"></div>
+            <div id="sentenceText" class="gym-sentence tts-clickable-text" style="display: none;" onclick="if(this.innerText) window.playSentenceAudio(null, this.innerText)" title="클릭하여 문장 발음 다시 듣기"></div>
+            <div id="extraExamplesBox" style="display: none; margin-top: 1.15rem; padding-top: 0.9rem; border-top: 1px dashed var(--border); text-align: left;">
+                <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.4rem; font-weight: 600;">추가 응용 예문 (클릭하여 발음 듣기)</div>
+                <ul id="extraExamplesList" class="extra-examples" style="margin: 0;"></ul>
+            </div>
         </div>
 
         <div class="gym-controls">
@@ -503,7 +510,42 @@ pub async fn audio_gym_page(
         const timerDisplay = document.getElementById('timerDisplay');
         const chunkText = document.getElementById('chunkText');
         const sentenceText = document.getElementById('sentenceText');
+        const extraExamplesBox = document.getElementById('extraExamplesBox');
+        const extraExamplesList = document.getElementById('extraExamplesList');
         const progressText = document.getElementById('progressText');
+
+        function renderGymExtraExamples(card) {{
+            if (!extraExamplesBox || !extraExamplesList) return;
+            extraExamplesList.innerHTML = '';
+            if (!card || !Array.isArray(card.extra_examples) || card.extra_examples.length === 0) {{
+                extraExamplesBox.style.display = 'none';
+                return;
+            }}
+            card.extra_examples.forEach(ex => {{
+                if (!ex || !ex.english) return;
+                const li = document.createElement('li');
+                const strong = document.createElement('strong');
+                strong.className = 'tts-clickable-text';
+                strong.textContent = ex.english;
+                strong.title = '클릭하여 예문 발음 듣기';
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn-tts-speaker-sm';
+                btn.innerHTML = `{ICON_SPEAKER} <span>듣기</span>`;
+                btn.onclick = () => window.playSentenceAudio(btn, ex.english);
+                strong.onclick = () => window.playSentenceAudio(btn, ex.english);
+
+                li.appendChild(strong);
+                li.appendChild(document.createTextNode(' '));
+                li.appendChild(btn);
+                if (ex.korean) {{
+                    li.appendChild(document.createTextNode(' : ' + ex.korean));
+                }}
+                extraExamplesList.appendChild(li);
+            }});
+            extraExamplesBox.style.display = 'block';
+        }}
 
         // 단일 Audio 인스턴스 반환 (iOS Safari / Android 무중단 연속 재생 보장)
         function getSharedAudio() {{
@@ -911,8 +953,11 @@ pub async fn audio_gym_page(
                     updateProgress();
                     const card = playlist[currentIndex];
                     koreanText.innerText = card.korean_meaning;
+                    chunkText.style.display = 'block';
                     chunkText.innerText = card.chunk;
+                    sentenceText.style.display = 'block';
                     sentenceText.innerText = card.context_sentence;
+                    renderGymExtraExamples(card);
                 }}
             }}
         }}
@@ -929,8 +974,11 @@ pub async fn audio_gym_page(
                     updateProgress();
                     const card = playlist[currentIndex];
                     koreanText.innerText = card.korean_meaning;
+                    chunkText.style.display = 'block';
                     chunkText.innerText = card.chunk;
+                    sentenceText.style.display = 'block';
                     sentenceText.innerText = card.context_sentence;
+                    renderGymExtraExamples(card);
                 }}
             }} else {{
                 pause();
@@ -951,10 +999,21 @@ pub async fn audio_gym_page(
                     const nextCard = playlist[currentIndex + i];
                     prefetchSpeechAudio(nextCard.korean_meaning, 'ko', voiceGender);
                     prefetchSpeechAudio(nextCard.context_sentence, 'en', voiceGender);
+                    if (Array.isArray(nextCard.extra_examples)) {{
+                        nextCard.extra_examples.forEach(ex => {{
+                            if (ex && ex.english) prefetchSpeechAudio(ex.english, 'en', voiceGender);
+                        }});
+                    }}
                 }}
             }}
             // 현재 카드의 영어 오디오 사전 로드
             prefetchSpeechAudio(card.context_sentence, 'en', voiceGender);
+            if (Array.isArray(card.extra_examples)) {{
+                card.extra_examples.forEach(ex => {{
+                    if (ex && ex.english) prefetchSpeechAudio(ex.english, 'en', voiceGender);
+                    if (ex && ex.korean) prefetchSpeechAudio(ex.korean, 'ko', voiceGender);
+                }});
+            }}
 
             // STEP 1: 한국어 의미 듣기
             currentStep = 'ko';
@@ -963,6 +1022,7 @@ pub async fn audio_gym_page(
             timerDisplay.style.display = 'none';
             chunkText.style.display = 'none';
             sentenceText.style.display = 'none';
+            if (extraExamplesBox) extraExamplesBox.style.display = 'none';
 
             await new Promise(resolve => {{
                 playSpeech(card.korean_meaning, 'ko', resolve);
@@ -1003,6 +1063,7 @@ pub async fn audio_gym_page(
             chunkText.innerText = card.chunk;
             sentenceText.style.display = 'block';
             sentenceText.innerText = card.context_sentence;
+            renderGymExtraExamples(card);
 
             await new Promise(resolve => {{
                 playSpeech(card.context_sentence, 'en', resolve);
@@ -1020,6 +1081,27 @@ pub async fn audio_gym_page(
             }});
             if (!isPlaying || runId !== currentStepRunId) return;
 
+            // STEP 5: 추가 응용 예문 연속 듣기 (있는 경우)
+            if (Array.isArray(card.extra_examples) && card.extra_examples.length > 0) {{
+                for (let exIdx = 0; exIdx < card.extra_examples.length; exIdx++) {{
+                    const ex = card.extra_examples[exIdx];
+                    if (!ex || !ex.english) continue;
+                    await new Promise(r => setTimeout(r, 650));
+                    if (!isPlaying || runId !== currentStepRunId) return;
+                    stepIndicator.innerHTML = `<span class="sound-wave"><span></span><span></span><span></span></span> STEP 5: 추가 예문 훈련 (${{exIdx + 1}}/${{card.extra_examples.length}})`;
+                    if (ex.korean) {{
+                        koreanText.innerText = ex.korean;
+                    }}
+                    sentenceText.innerText = ex.english;
+                    await new Promise(resolve => {{
+                        playSpeech(ex.english, 'en', resolve);
+                    }});
+                    if (!isPlaying || runId !== currentStepRunId) return;
+                }}
+                koreanText.innerText = card.korean_meaning;
+                sentenceText.innerText = card.context_sentence;
+            }}
+
             await new Promise(r => setTimeout(r, 1200));
             if (!isPlaying || runId !== currentStepRunId) return;
 
@@ -1033,6 +1115,7 @@ pub async fn audio_gym_page(
                 timerDisplay.style.display = 'none';
                 chunkText.style.display = 'none';
                 sentenceText.style.display = 'none';
+                if (extraExamplesBox) extraExamplesBox.style.display = 'none';
             }}
         }}
 

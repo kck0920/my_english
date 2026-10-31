@@ -16,7 +16,7 @@ use crate::domain::{
     ClozePrompt, ExtraExample, ReviewRating, SrsTransition, StudyCard,
 };
 use crate::state::AppState;
-use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META};
+use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META, ICON_SPEAKER};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -328,14 +328,24 @@ pub fn render_output_transfer_prompt_page(
         } else {
             "<span class=\"stage-badge\" style=\"background: var(--danger); color: white;\">보완 필요</span>"
         };
+        let user_sent_enc = urlencoding::encode(user_sent);
+        let corrected_enc = urlencoding::encode(&eval.corrected_sentence);
         format!(
             r#"<section class="panel" style="border-left: 4px solid {border_color}; margin-top: 1rem;">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
     <strong>AI 첨삭 및 피드백</strong>
     {status_badge}
   </div>
-  <p style="margin: 0.25rem 0;"><strong>내 영작:</strong> {user_sent}</p>
-  <p style="margin: 0.25rem 0; color: var(--primary);"><strong>원어민 추천 문장:</strong> {corrected}</p>
+  <p style="margin: 0.35rem 0; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+    <strong>내 영작:</strong>
+    <span class="tts-clickable-text" onclick="window.playSentenceAudio(this.nextElementSibling, decodeURIComponent('{user_sent_enc}'))" title="클릭하여 내 영작 발음 듣기">{user_sent}</span>
+    <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, decodeURIComponent('{user_sent_enc}'))" title="내 영작 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
+  </p>
+  <p style="margin: 0.35rem 0; color: var(--primary-light); display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+    <strong>원어민 추천 문장:</strong>
+    <span class="tts-clickable-text" onclick="window.playSentenceAudio(this.nextElementSibling, decodeURIComponent('{corrected_enc}'))" title="클릭하여 추천 문장 발음 듣기">{corrected}</span>
+    <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, decodeURIComponent('{corrected_enc}'))" title="원어민 추천 문장 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
+  </p>
   <p style="margin: 0.5rem 0 0 0; font-size: 0.95rem; color: var(--text-muted);">{feedback}</p>
 
   <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
@@ -365,7 +375,9 @@ pub fn render_output_transfer_prompt_page(
             border_color = border_color,
             status_badge = status_badge,
             user_sent = escape_html(user_sent),
+            user_sent_enc = user_sent_enc,
             corrected = escape_html(&eval.corrected_sentence),
+            corrected_enc = corrected_enc,
             feedback = escape_html(&eval.feedback),
             id = card.id,
         )
@@ -388,6 +400,9 @@ pub fn render_output_transfer_prompt_page(
         )
     };
 
+    let chunk_enc = urlencoding::encode(&card.chunk);
+    let orig_context_enc = urlencoding::encode(&card.context_sentence);
+
     format!(
         r#"<!DOCTYPE html>
 <html lang="ko">
@@ -406,13 +421,17 @@ pub fn render_output_transfer_prompt_page(
     <section class="panel" style="border-left: 4px solid var(--primary);">
       <div class="chunk-header">
         <span class="stage-badge">SRS Stage {stage} · Output Transfer</span>
-        <span class="surface-badge">Chunk: {chunk}</span>
+        <div style="display:flex; align-items:center; gap:0.4rem;">
+          <span class="surface-badge">Chunk: {chunk}</span>
+          <button type="button" class="btn-tts-speaker-sm" style="margin-left:0;" onclick="window.playSentenceAudio(this, decodeURIComponent('{chunk_enc}'))" title="Chunk 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
+        </div>
       </div>
       <h2 style="font-size: 1.15rem; margin: 0.75rem 0 0.5rem 0; color: var(--text-dark);">
         상황 제시: "{korean_prompt}"
       </h2>
-      <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0;">
-        (원래 예문: {orig_context})
+      <p style="font-size: 0.9rem; color: var(--text-muted); margin: 0; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+        <span class="tts-clickable-text" onclick="window.playSentenceAudio(this.nextElementSibling, decodeURIComponent('{orig_context_enc}'))" title="클릭하여 원래 예문 발음 듣기">(원래 예문: {orig_context})</span>
+        <button type="button" class="btn-tts-speaker-sm" style="margin-left:0;" onclick="window.playSentenceAudio(this, decodeURIComponent('{orig_context_enc}'))" title="원래 예문 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
       </p>
     </section>
 
@@ -424,8 +443,10 @@ pub fn render_output_transfer_prompt_page(
         due_count = due_count,
         stage = card.srs_stage,
         chunk = escape_html(&card.chunk),
+        chunk_enc = chunk_enc,
         korean_prompt = escape_html(&prompt.korean_prompt),
         orig_context = escape_html(&card.context_sentence),
+        orig_context_enc = orig_context_enc,
         eval_section = eval_section,
     )
 }
@@ -835,8 +856,10 @@ pub fn render_review_card_page(
     if !card.extra_examples.is_empty() {
         examples_html.push_str("<ul class=\"extra-examples\">");
         for ex in &card.extra_examples {
+            let ex_enc = urlencoding::encode(&ex.english);
             examples_html.push_str(&format!(
-                "<li><strong>{}</strong> — {}</li>",
+                r#"<li><strong class="tts-clickable-text" data-tts-text="{}" onclick="playReviewAudio(this.nextElementSibling, decodeURIComponent('{ex_enc}'))" title="클릭하여 예문 발음 듣기">{}</strong> <button type="button" class="btn-tts-speaker-sm" onclick="playReviewAudio(this, decodeURIComponent('{ex_enc}'))" title="예문 발음 듣기" aria-label="예문 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button> — {}</li>"#,
+                escape_html(&ex.english),
                 escape_html(&ex.english),
                 escape_html(&ex.korean)
             ));
@@ -859,15 +882,16 @@ pub fn render_review_card_page(
             r#"{feedback_banner}
 <section class="panel" id="review-answer-side">
   <div class="chunk-header">
-    <div>
-      <span class="chunk-title">{surface_chunk}</span>
+    <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+      <span class="chunk-title tts-clickable-text" onclick="playReviewAudio(this.parentElement.querySelector('.btn-tts-speaker-sm'), decodeURIComponent('{surface_chunk_enc}'))" title="클릭하여 Chunk 발음 듣기">{surface_chunk}</span>
       <span class="surface-badge">원형 Chunk: {chunk}</span>
+      <button type="button" class="btn-tts-speaker-sm" style="margin-left:0;" onclick="playReviewAudio(this, decodeURIComponent('{surface_chunk_enc}'))" title="Chunk 발음 듣기" aria-label="Chunk 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
     </div>
     <span class="stage-badge">SRS Stage {srs_stage}</span>
   </div>
-  <div style="display: flex; align-items: center; gap: 0.5rem;">
-    <p class="context-sentence" style="font-size: 1.15rem; font-weight: 600; margin: 0;">{context_sentence}</p>
-    <button type="button" class="btn" style="padding: 0.25rem 0.5rem; font-size: 0.85rem;" onclick="playReviewAudio(this, decodeURIComponent('{context_sentence_enc}'))">🔊</button>
+  <div class="context-sentence-wrap" style="margin: 0.35rem 0;">
+    <p class="context-sentence tts-clickable-text" style="font-size: 1.15rem; font-weight: 600; margin: 0;" onclick="playReviewAudio(this.nextElementSibling, decodeURIComponent('{context_sentence_enc}'))" title="클릭하여 대표 문장 발음 듣기">{context_sentence}</p>
+    <button type="button" class="btn-tts-speaker" onclick="playReviewAudio(this, decodeURIComponent('{context_sentence_enc}'))" title="대표 문장 발음 듣기" aria-label="대표 문장 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
   </div>
   <p class="korean-meaning">{korean_meaning}</p>
   {examples_html}
@@ -893,6 +917,7 @@ pub fn render_review_card_page(
             id = card.id,
             chunk = escape_html(&card.chunk),
             surface_chunk = escape_html(&cloze.target_surface),
+            surface_chunk_enc = urlencoding::encode(&cloze.target_surface),
             srs_stage = card.srs_stage,
             context_sentence = escape_html(&card.context_sentence),
             context_sentence_enc = urlencoding::encode(&card.context_sentence),
@@ -906,7 +931,10 @@ pub fn render_review_card_page(
     <span class="surface-badge" id="word-count-hint">힌트: {word_count} words ({word_count}단어)</span>
   </div>
   <p class="korean-meaning" style="font-size: 1.15rem; font-weight: 600; margin-top: 0.75rem;">{korean_meaning}</p>
-  <p class="context-sentence" style="font-size: 1.15rem; margin: 1rem 0;">{masked_sentence}</p>
+  <div class="context-sentence-wrap" style="margin: 1rem 0;">
+    <p class="context-sentence" style="font-size: 1.15rem; margin: 0;" data-full-sentence="{full_sentence_attr}">{masked_sentence}</p>
+    <button type="button" class="btn-tts-speaker" onclick="playReviewAudio(this, decodeURIComponent('{context_sentence_enc}'))" title="문장 발음 힌트 듣기" aria-label="문장 발음 힌트 듣기">{ICON_SPEAKER} <span>발음 듣기</span></button>
+  </div>
   <form method="POST" action="/review/{id}/check">
     <label for="user_input">빈칸에 들어갈 영어 Chunk 입력</label>
     <input type="text" id="user_input" name="user_input" autofocus autocomplete="off" placeholder="영어 Chunk를 입력하세요...">
@@ -921,6 +949,8 @@ pub fn render_review_card_page(
             word_count = cloze.word_count,
             korean_meaning = escape_html(&card.korean_meaning),
             masked_sentence = escape_html(&cloze.masked_sentence),
+            full_sentence_attr = escape_html(&card.context_sentence),
+            context_sentence_enc = urlencoding::encode(&card.context_sentence),
         )
     };
 
@@ -973,11 +1003,25 @@ pub fn render_review_card_page(
         .catch(() => {{}});
     }}
 
+    let reviewActiveFinish = null;
+
     function playReviewAudio(btn, text) {{
       if (!text || !text.trim()) return;
       const clean = text.trim();
-      const orig = btn ? btn.innerText : '🔊';
-      if (btn) btn.innerText = '🔊 ...';
+
+      if (typeof reviewActiveFinish === 'function') {{
+        try {{ reviewActiveFinish(); }} catch (e) {{}}
+      }}
+
+      const origHtml = btn ? (btn.getAttribute('data-orig-html') || btn.innerHTML) : '🔊';
+      if (btn) {{
+        btn.disabled = true;
+        btn.classList.add('playing');
+        if (!btn.getAttribute('data-orig-html')) {{
+          btn.setAttribute('data-orig-html', origHtml);
+        }}
+        btn.innerHTML = '<span class="audio-spinner"></span> <span>재생중...</span>';
+      }}
 
       reviewPlayToken++;
       const myToken = reviewPlayToken;
@@ -994,12 +1038,21 @@ pub fn render_review_card_page(
             clearTimeout(reviewWatchdog);
             reviewWatchdog = null;
           }}
-          if (myToken === reviewPlayToken && btn) btn.innerText = orig;
+          if (reviewActiveFinish === finish) {{
+            reviewActiveFinish = null;
+          }}
+          if (btn) {{
+            btn.disabled = false;
+            btn.classList.remove('playing');
+            btn.innerHTML = btn.getAttribute('data-orig-html') || origHtml;
+          }}
         }}
       }};
 
+      reviewActiveFinish = finish;
+
       // Safety watchdog timer: never hang
-      reviewWatchdog = setTimeout(finish, 8000);
+      reviewWatchdog = setTimeout(finish, 10000);
 
       const fallbackBrowser = () => {{
         if (myToken !== reviewPlayToken || done) return;
@@ -1020,6 +1073,7 @@ pub fn render_review_card_page(
 
       try {{
         const audio = getReviewAudio();
+        try {{ audio.pause(); }} catch (e) {{}}
         audio.onended = finish;
         audio.onerror = () => {{
           fallbackBrowser();
@@ -1029,6 +1083,7 @@ pub fn render_review_card_page(
         const key = gender + ':' + clean;
         const cachedUrl = reviewBlobCache.get(key);
         audio.src = cachedUrl || ('/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=' + encodeURIComponent(gender));
+        try {{ audio.currentTime = 0; }} catch (e) {{}}
         if (!cachedUrl) {{
           prefetchReviewAudio(clean);
         }}
@@ -1045,12 +1100,17 @@ pub fn render_review_card_page(
       }}
     }}
 
-    // 현재 문장 오디오 사전 로드 (0ms 즉시 재생)
+    // 현재 카드의 모든 영어 문장 오디오 사전 로드 (0ms 즉시 재생)
     document.addEventListener('DOMContentLoaded', () => {{
       const el = document.querySelector('.context-sentence');
-      if (el && el.innerText) {{
-        prefetchReviewAudio(el.innerText);
+      if (el) {{
+        const fullSent = el.getAttribute('data-full-sentence') || el.innerText;
+        if (fullSent) prefetchReviewAudio(fullSent);
       }}
+      document.querySelectorAll('.extra-examples li strong').forEach(node => {{
+        const exText = node.getAttribute('data-tts-text') || node.innerText;
+        if (exText) prefetchReviewAudio(exText);
+      }});
     }});
   </script>
 </body>

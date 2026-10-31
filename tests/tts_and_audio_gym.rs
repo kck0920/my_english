@@ -12,7 +12,7 @@ use axum::{
 use http_body_util::BodyExt;
 use my_english::{
     build_app, cards, db,
-    domain::CreateStudyCardInput,
+    domain::{CreateStudyCardInput, ExtraExample},
     state::AppState,
     tts::{AudioGymItem, TtsProvider},
 };
@@ -304,15 +304,24 @@ async fn home_page_renders_voice_gender_picker_and_card_tts_speaker_buttons() {
     let fake_tts = Arc::new(FakeTtsProvider::default());
     let (app, cookie, pool) = test_app_with_tts(fake_tts.clone()).await;
 
-    // Create a card
-    cards::insert_study_card(
+    // Create a card with extra_examples
+    let card = cards::insert_study_card(
         &pool,
         &CreateStudyCardInput {
             chunk: "would you mind if I".to_string(),
             surface_chunk: "Would you mind if I".to_string(),
             context_sentence: "Would you mind if I left a bit early today?".to_string(),
             korean_meaning: "제가 오늘 조금 일찍 가도 될까요?".to_string(),
-            extra_examples: vec![],
+            extra_examples: vec![
+                ExtraExample {
+                    english: "Would you mind if I opened the window?".to_string(),
+                    korean: "제가 창문을 좀 열어도 될까요?".to_string(),
+                },
+                ExtraExample {
+                    english: "Would you mind if I sat here?".to_string(),
+                    korean: "제가 여기 앉아도 될까요?".to_string(),
+                },
+            ],
             nuance_note: String::new(),
             tags: vec!["polite".to_string()],
             source_type: None,
@@ -322,6 +331,7 @@ async fn home_page_renders_voice_gender_picker_and_card_tts_speaker_buttons() {
     .unwrap();
 
     let res = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/")
@@ -341,9 +351,65 @@ async fn home_page_renders_voice_gender_picker_and_card_tts_speaker_buttons() {
     assert!(html.contains("여성 음성"));
     assert!(html.contains("남성 음성"));
 
-    // 2. Study Card contains the TTS speaker button next to the context sentence
+    // 2. Study Card contains TTS speaker buttons for context sentence, chunk, and all extra examples
     assert!(html.contains("context-sentence-wrap"));
     assert!(html.contains("btn-tts-speaker"));
+    assert!(html.contains("btn-tts-speaker-sm"));
     assert!(html.contains("playSentenceAudio"));
     assert!(html.contains("Would you mind if I left a bit early today?"));
+    assert!(html.contains("Would%20you%20mind%20if%20I%20opened%20the%20window%3F"));
+    assert!(html.contains("Would%20you%20mind%20if%20I%20sat%20here%3F"));
+
+    // 3. Review page (both prompt and revealed answer side) renders audio speaker buttons for all sentences
+    let rev_prompt_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/review?card_id={}", card.id))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rev_prompt_res.status(), StatusCode::OK);
+    let rev_prompt_html = String::from_utf8_lossy(&rev_prompt_res.into_body().collect().await.unwrap().to_bytes()).to_string();
+    assert!(rev_prompt_html.contains("playReviewAudio"));
+    assert!(rev_prompt_html.contains("발음 듣기"));
+
+    let rev_ans_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/review?reveal=1&card_id={}", card.id))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(rev_ans_res.status(), StatusCode::OK);
+    let rev_ans_html = String::from_utf8_lossy(&rev_ans_res.into_body().collect().await.unwrap().to_bytes()).to_string();
+    assert!(rev_ans_html.contains("playReviewAudio"));
+    assert!(rev_ans_html.contains("Would%20you%20mind%20if%20I%20opened%20the%20window%3F"));
+    assert!(rev_ans_html.contains("Would%20you%20mind%20if%20I%20sat%20here%3F"));
+
+    // 4. Audio Gym playlist API returns extra_examples as well
+    let gym_api_res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/audio-gym/playlist?filter=all")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(gym_api_res.status(), StatusCode::OK);
+    let gym_items: Vec<AudioGymItem> = serde_json::from_slice(
+        &gym_api_res.into_body().collect().await.unwrap().to_bytes(),
+    )
+    .unwrap();
+    assert_eq!(gym_items.len(), 1);
+    assert_eq!(gym_items[0].extra_examples.len(), 2);
 }

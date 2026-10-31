@@ -85,22 +85,74 @@ pub const HEAD_META: &str = r##"<meta charset="UTF-8">
     window.getPreferredVoiceGender = getPreferredVoiceGender;
     window.switchVoiceGender = switchVoiceGender;
 
+    window._ttsBlobCache = new Map();
+    window._ttsPrefetchInFlight = new Map();
+    window._activeAudioFinish = null;
+
+    window.prefetchSentenceAudio = function(text) {
+      if (!text || !text.trim()) return Promise.resolve(null);
+      var clean = text.trim();
+      var gender = getPreferredVoiceGender();
+      var key = gender + ':' + clean;
+      if (window._ttsBlobCache.has(key)) {
+        return Promise.resolve(window._ttsBlobCache.get(key));
+      }
+      if (window._ttsPrefetchInFlight.has(key)) {
+        return window._ttsPrefetchInFlight.get(key);
+      }
+      var url = '/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=' + encodeURIComponent(gender);
+      var p = fetch(url)
+        .then(function(res) { return res.ok ? res.blob() : null; })
+        .then(function(blob) {
+          window._ttsPrefetchInFlight.delete(key);
+          if (blob && blob.size > 0) {
+            var blobUrl = URL.createObjectURL(blob);
+            window._ttsBlobCache.set(key, blobUrl);
+            return blobUrl;
+          }
+          return null;
+        })
+        .catch(function() {
+          window._ttsPrefetchInFlight.delete(key);
+          return null;
+        });
+      window._ttsPrefetchInFlight.set(key, p);
+      return p;
+    };
+
     window.playSentenceAudio = function(btn, text) {
       if (!text || !text.trim()) return;
       var clean = text.trim();
       var gender = getPreferredVoiceGender();
-      var origHtml = btn ? btn.innerHTML : '';
+      var key = gender + ':' + clean;
+
+      // 이전 재생 중인 버튼이 있다면 즉시 원래 상태로 복원
+      if (typeof window._activeAudioFinish === 'function') {
+        try { window._activeAudioFinish(); } catch (e) {}
+      }
+
+      var origHtml = btn ? (btn.getAttribute('data-orig-html') || btn.innerHTML) : '';
       if (btn) {
         btn.disabled = true;
         btn.classList.add('playing');
-        btn.setAttribute('data-orig-html', origHtml);
+        if (!btn.getAttribute('data-orig-html')) {
+          btn.setAttribute('data-orig-html', origHtml);
+        }
         btn.innerHTML = '<span class="audio-spinner"></span> <span>재생중...</span>';
       }
 
       var done = false;
+      var timer = null;
       var finish = function() {
         if (!done) {
           done = true;
+          if (timer) {
+            clearTimeout(timer);
+            timer = null;
+          }
+          if (window._activeAudioFinish === finish) {
+            window._activeAudioFinish = null;
+          }
           if (btn) {
             btn.disabled = false;
             btn.classList.remove('playing');
@@ -109,10 +161,11 @@ pub const HEAD_META: &str = r##"<meta charset="UTF-8">
         }
       };
 
-      var timer = setTimeout(finish, 8000);
+      window._activeAudioFinish = finish;
+      timer = setTimeout(finish, 10000);
 
       var fallbackSpeech = function() {
-        clearTimeout(timer);
+        if (done) return;
         if ('speechSynthesis' in window) {
           try {
             window.speechSynthesis.cancel();
@@ -140,24 +193,43 @@ pub const HEAD_META: &str = r##"<meta charset="UTF-8">
       try {
         if (!window._globalAudioPlayer) {
           window._globalAudioPlayer = new Audio();
+          window._globalAudioPlayer.preload = 'auto';
+          window._globalAudioPlayer.setAttribute('playsinline', '');
+          window._globalAudioPlayer.setAttribute('webkit-playsinline', '');
         }
         var audio = window._globalAudioPlayer;
-        audio.pause();
+        try { audio.pause(); } catch (e) {}
         audio.onended = function() {
-          clearTimeout(timer);
           finish();
         };
         audio.onerror = function() {
-          clearTimeout(timer);
           fallbackSpeech();
         };
 
-        audio.src = '/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=' + encodeURIComponent(gender);
+        var cachedUrl = window._ttsBlobCache.get(key);
+        var directUrl = '/api/tts?text=' + encodeURIComponent(clean) + '&lang=en&gender=' + encodeURIComponent(gender);
+        audio.src = cachedUrl || directUrl;
+        try { audio.currentTime = 0; } catch (e) {}
+        if (!cachedUrl) {
+          window.prefetchSentenceAudio(clean);
+        }
+
         var p = audio.play();
         if (p !== undefined) {
           p.catch(function(err) {
-            console.warn('Audio play failed, falling back to Web Speech:', err);
-            fallbackSpeech();
+            if (done) return;
+            window.prefetchSentenceAudio(clean).then(function(blobUrl) {
+              if (done) return;
+              if (blobUrl) {
+                audio.src = blobUrl;
+                try { audio.currentTime = 0; } catch (e) {}
+                audio.play().catch(function() {
+                  fallbackSpeech();
+                });
+              } else {
+                fallbackSpeech();
+              }
+            });
           });
         }
       } catch (err) {
@@ -989,21 +1061,44 @@ header.navbar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
+  gap: 0.25rem;
+  background: var(--surface-card);
   border: 1px solid var(--border);
-  color: var(--text-muted);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
+  color: var(--primary-light);
+  padding: 0.18rem 0.55rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+  font-weight: 600;
   cursor: pointer;
-  margin-left: 0.4rem;
+  margin-left: 0.35rem;
   vertical-align: middle;
-  transition: border-color 0.15s ease, color 0.15s ease;
+  transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .btn-tts-speaker-sm:hover {
   border-color: var(--border-accent);
+  color: var(--text);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.btn-tts-speaker-sm.playing {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--playing-surface);
+}
+
+.tts-clickable-text {
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.tts-clickable-text:hover {
   color: var(--primary-light);
+  text-decoration: underline;
+  text-decoration-color: var(--border-accent);
+  text-underline-offset: 3px;
 }
 
 @keyframes tts-spin {
@@ -1552,7 +1647,7 @@ pub fn render_dashboard(
                 for ex in &card.extra_examples {
                     let ex_enc = urlencoding::encode(&ex.english);
                     examples_html.push_str(&format!(
-                        r#"<li><strong>{}</strong> <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, decodeURIComponent('{ex_enc}'))" title="예문 발음 듣기" aria-label="예문 발음 듣기">{ICON_SPEAKER}</button>: {}</li>"#,
+                        r#"<li><strong class="tts-clickable-text" onclick="window.playSentenceAudio(this.nextElementSibling, decodeURIComponent('{ex_enc}'))" title="클릭하여 예문 발음 듣기">{}</strong> <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, decodeURIComponent('{ex_enc}'))" title="예문 발음 듣기" aria-label="예문 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>: {}</li>"#,
                         escape_html(&ex.english),
                         escape_html(&ex.korean)
                     ));
@@ -1582,19 +1677,21 @@ pub fn render_dashboard(
                 .collect::<Vec<_>>()
                 .join("\n");
             let tags_text = card.tags.join(", ");
+            let chunk_enc = urlencoding::encode(&card.chunk);
             let context_sentence_enc = urlencoding::encode(&card.context_sentence);
 
             cards_html.push_str(&format!(
                 r#"<article class="study-card" data-card-id="{id}">
   <div class="chunk-header">
     <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
-      <span class="chunk-title">{chunk}</span>
+      <span class="chunk-title tts-clickable-text" onclick="window.playSentenceAudio(this.parentElement.querySelector('.btn-tts-speaker-sm'), decodeURIComponent('{chunk_enc}'))" title="클릭하여 Chunk 발음 듣기">{chunk}</span>
       <span class="surface-badge" title="Surface Chunk in Context Sentence">{surface_chunk}</span>
+      <button type="button" class="btn-tts-speaker-sm" style="margin-left:0;" onclick="window.playSentenceAudio(this, decodeURIComponent('{chunk_enc}'))" title="Chunk 발음 듣기" aria-label="Chunk 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
     </div>
     <span class="stage-badge" data-stage="{srs_stage}">SRS Stage {srs_stage}</span>
   </div>
   <div class="context-sentence-wrap">
-    <p class="context-sentence">{context_sentence}</p>
+    <p class="context-sentence tts-clickable-text" onclick="window.playSentenceAudio(this.nextElementSibling, decodeURIComponent('{context_sentence_enc}'))" title="클릭하여 문장 발음 듣기">{context_sentence}</p>
     <button type="button" class="btn-tts-speaker" onclick="window.playSentenceAudio(this, decodeURIComponent('{context_sentence_enc}'))" title="문장 발음 듣기" aria-label="문장 발음 듣기">
       {ICON_SPEAKER}
       <span>듣기</span>
@@ -1632,6 +1729,7 @@ pub fn render_dashboard(
 </article>"#,
                 id = card.id,
                 chunk = escape_html(&card.chunk),
+                chunk_enc = chunk_enc,
                 surface_chunk = escape_html(&card.surface_chunk),
                 srs_stage = card.srs_stage,
                 context_sentence = escape_html(&card.context_sentence),

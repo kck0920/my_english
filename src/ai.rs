@@ -19,7 +19,7 @@ use crate::domain::{
     detect_surface_chunk, DraftCard, OutputTransferEvaluation, OutputTransferPrompt,
 };
 use crate::state::AppState;
-use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META, ICON_SPARKLE};
+use crate::ui::{escape_html, render_navbar, APP_CSS, HEAD_META, ICON_SPARKLE, ICON_SPEAKER};
 
 pub const GOOGLE_OAUTH_CLIENT_ID: &str =
     "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com";
@@ -1298,6 +1298,20 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
             .join("\n");
         let tags_text = draft.tags.join(", ");
 
+        let mut extra_preview_html = String::new();
+        if !draft.extra_examples.is_empty() {
+            extra_preview_html.push_str("<ul class=\"extra-examples\" style=\"margin-top:0.35rem; margin-bottom:0.75rem;\">");
+            for ex in &draft.extra_examples {
+                let ex_enc = urlencoding::encode(&ex.english);
+                extra_preview_html.push_str(&format!(
+                    r#"<li><strong class="tts-clickable-text" onclick="window.playSentenceAudio(this.nextElementSibling, decodeURIComponent('{ex_enc}'))" title="클릭하여 예문 발음 듣기">{}</strong> <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, decodeURIComponent('{ex_enc}'))" title="예문 발음 듣기" aria-label="예문 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>: {}</li>"#,
+                    escape_html(&ex.english),
+                    escape_html(&ex.korean)
+                ));
+            }
+            extra_preview_html.push_str("</ul>");
+        }
+
         drafts_html.push_str(&format!(
             r#"<article class="study-card draft-card" data-draft-index="{idx}" id="draft-card-{idx}">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.75rem;">
@@ -1306,16 +1320,23 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
   </div>
   <form method="POST" action="/cards" onsubmit="handleDraftCardSubmit(event, this)">
     <input type="hidden" name="source_type" value="smart_input">
-    <label>Chunk (원형)</label>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <label style="margin-bottom:0;">Chunk (원형)</label>
+      <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, this.closest('form').querySelector('input[name=chunk]').value)" title="Chunk 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
+    </div>
     <input type="text" name="chunk" value="{chunk}" required>
     <label>Surface Chunk (문장 내 실제 활용형)</label>
     <input type="text" name="surface_chunk" value="{surface_chunk}">
-    <label>Context Sentence (대표 영어 예문)</label>
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <label style="margin-bottom:0;">Context Sentence (대표 영어 예문)</label>
+      <button type="button" class="btn-tts-speaker-sm" onclick="window.playSentenceAudio(this, this.closest('form').querySelector('input[name=context_sentence]').value)" title="대표 문장 발음 듣기">{ICON_SPEAKER} <span>듣기</span></button>
+    </div>
     <input type="text" name="context_sentence" value="{context_sentence}" required>
     <label>대표 문장 한국어 해석 (Context Sentence 전체 번역)</label>
     <input type="text" name="korean_meaning" value="{korean_meaning}" required placeholder="예: 떠나기 전에 현관문을 반드시 잠그도록 하세요.">
     <label>추가 응용 예문 (영어 | 한국어, 줄바꿈 구분)</label>
     <textarea name="extra_examples" rows="2">{extra_examples}</textarea>
+    {extra_preview_html}
     <label>AI 뉘앙스 / 교정 해설</label>
     <textarea name="nuance_note" rows="2">{nuance_note}</textarea>
     <label>상황 태그 (쉼표로 구분)</label>
@@ -1330,6 +1351,7 @@ pub fn render_draft_cards_page(user_input: &str, drafts: &[DraftCard]) -> String
             context_sentence = escape_html(&draft.context_sentence),
             korean_meaning = escape_html(&draft.korean_meaning),
             extra_examples = escape_html(&extra_examples_text),
+            extra_preview_html = extra_preview_html,
             nuance_note = escape_html(&draft.nuance_note),
             tags = escape_html(&tags_text),
         ));
